@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vectors and Coordinates</title>
+<link rel="stylesheet" href="../../common/style.css">
+</head>
+<body>
+<nav class="steps-nav">
+  <a href="../../index.html">↑ Contents</a>
+  <a href="../02-angles/index.html">Step 2: Angles and rotation →</a>
+</nav>
+
+<article>
+<p class="kicker">Part 1 · Step 1</p>
+<h1>Vectors and coordinates</h1>
+<p class="lede">Everything a Wolfenstein-style engine does (moving the player, casting rays,
+projecting walls) comes down to a handful of operations on 2D vectors. This step sets
+up the coordinate system and the vector toolbox used for the rest of the series.</p>
+
+<h2>The world is a flat grid</h2>
+<p>A Wolfenstein 3D level is a 2D map, 64 × 64 cells, where each cell is either empty or a
+solid cube of wall. There is no “up” in the world data at all: every wall is the same height,
+and the floor and ceiling are flat. The third dimension only appears at the very end, when we
+<em>draw</em>.</p>
+<p>So our world coordinates are two numbers, <code>(x, y)</code>, measured in cells:</p>
+<ul>
+  <li><strong>x grows to the right, y grows downward.</strong> That's the same orientation as
+  screen pixels and as a map stored in rows (<code>map[y][x]</code>), so the top-down
+  diagrams and the map data line up with no flipping.</li>
+  <li>One unit = one cell. The point <code>(3.5, 2.5)</code> is the centre of the cell in
+  column 3, row 2. The cell containing a point is <code>(floor(x), floor(y))</code>.</li>
+</ul>
+<aside class="note">Because y points down, the coordinate system is “left-handed” compared to the
+maths-textbook one. The only visible consequence: positive angles turn <em>clockwise</em> on screen.
+We'll meet that in step 2.</aside>
+
+<h2>Points and vectors</h2>
+<p>Both are pairs of numbers, but they mean different things. A <strong>point</strong> is a location
+(where the player stands). A <strong>vector</strong> is a displacement (which way the player
+faces, how far a ray travelled). Point − point = vector; point + vector = point.</p>
+<p>In the demos we write them as small objects:</p>
+<pre><code>const add   = (a, b) =&gt; ({ x: a.x + b.x, y: a.y + b.y });
+const sub   = (a, b) =&gt; ({ x: a.x - b.x, y: a.y - b.y });
+const scale = (a, k) =&gt; ({ x: a.x * k,   y: a.y * k });
+const dot   = (a, b) =&gt; a.x * b.x + a.y * b.y;
+const len   = (a)    =&gt; Math.hypot(a.x, a.y);           // √(x² + y²)
+const norm  = (a)    =&gt; scale(a, 1 / len(a));          // same direction, length 1
+const perp  = (a)    =&gt; ({ x: -a.y, y: a.x });         // rotated 90°</code></pre>
+<p>In the engine itself (from step 5 on) we'll unpack vectors into plain variables like
+<code>dirX, dirY</code>. That avoids creating objects in the inner loops, and it's
+also how the original C code looked.</p>
+
+<h2>The three operations that matter</h2>
+
+<h3>1. Addition and scaling: moving along a direction</h3>
+<p>If the player stands at <code>pos</code> and faces unit vector <code>d</code>, then
+<code>pos + t·d</code> is the point <code>t</code> cells straight ahead. Walking forward is
+<code>pos = pos + speed·dt·d</code>. Casting a ray is the same formula with a growing <code>t</code>.
+This one expression, <span class="math" style="display:inline">P(t) = pos + t·dir</span>, is the
+heart of a raycaster.</p>
+
+<h3>2. Length and normalisation</h3>
+<p><code>len(v)</code> is the Euclidean distance (Pythagoras). A <em>unit</em> vector has length 1
+and represents a pure direction. <code>norm(v)</code> divides by the length to get one. We'll
+mostly keep the facing direction normalised, so that “<code>t</code> units along it” really
+means <code>t</code> cells.</p>
+
+<h3>3. The dot product: “how much of a is along b”</h3>
+<p class="math">a · b = a<sub>x</sub>b<sub>x</sub> + a<sub>y</sub>b<sub>y</sub> = |a| |b| cos θ</p>
+<p>where θ is the angle between the vectors. Three things follow that we'll use a lot:</p>
+<ul>
+  <li>If <code>b</code> is a unit vector, <code>a · b</code> is the length of the
+  <strong>projection</strong> of <code>a</code> onto <code>b</code>: the shadow <code>a</code>
+  casts on <code>b</code>'s line. This is exactly “how far in front of me is that point”, which is
+  the depth we need for perspective (step 6) and for the fisheye fix (step 7).</li>
+  <li>The <strong>sign</strong> says front or back: positive means less than 90° apart, negative
+  means pointing away. “Is the enemy in front of me?” is one dot product.</li>
+  <li>Zero means perpendicular.</li>
+</ul>
+
+<h3>Bonus: the perpendicular</h3>
+<p><code>perp(a) = (−a.y, a.x)</code> is <code>a</code> rotated by 90°. Check it: the dot product
+<code>a.x·(−a.y) + a.y·a.x = 0</code>. With y pointing down, this rotation is
+<em>clockwise on screen</em>. In other words, if <code>a</code> is where you're looking,
+<code>perp(a)</code> points to your <strong>right</strong>. Step 3 builds the camera's “screen
+plane” from exactly this vector.</p>
+
+<figure class="demo">
+  <canvas id="v-canvas" width="480" height="360"></canvas>
+  <div class="controls">
+    <label><input type="checkbox" id="v-sum" checked> a + b</label>
+    <label><input type="checkbox" id="v-proj" checked> projection of b onto a</label>
+    <label><input type="checkbox" id="v-perp"> perp(a)</label>
+  </div>
+  <div class="readout" id="v-readout"></div>
+  <figcaption>Drag the tips of <span style="color:#ef476f">a</span> and
+  <span style="color:#4cc9f0">b</span>. Grid squares are one unit. Watch the sign of
+  <code>a · b</code> flip as <code>b</code> swings past 90° from <code>a</code>.</figcaption>
+</figure>
+
+<div class="try">
+<ul>
+  <li>Make <code>a · b</code> exactly zero. The projection collapses to the origin.</li>
+  <li>Turn on <code>perp(a)</code> and rotate <code>a</code>: perp always stays 90° clockwise (to
+  the “right” of a).</li>
+  <li>Make <code>a</code> length 1 (|a| = 1.00). Now the projection length is just
+  <code>a · b</code>.</li>
+</ul>
+</div>
+
+<aside class="retro">
+<h3>No floating point: fixed-point numbers</h3>
+<p>Our JavaScript uses 64-bit floats for everything, and that's fine. In 1992 it wasn't.
+The 386 had no floating-point unit (the 387 math coprocessor was an expensive extra), and even
+with one, float maths was far slower than integer maths. So Wolfenstein 3D and Doom store
+every coordinate as a <strong>fixed-point</strong> integer: a 32-bit value whose low 16 bits are
+the fraction. This is called “16.16” format.</p>
+<pre><code>value_fixed = round(value × 65536)        // 1.0 is 0x00010000
+a + b  →  a_fixed + b_fixed               // addition is just integer addition
+a × b  →  (a_fixed × b_fixed) &gt;&gt; 16       // the product has 32 fraction bits; shift 16 away</code></pre>
+<p>In Wolfenstein's source, one map cell is <code>TILEGLOBAL = 1&lt;&lt;16</code>, so the
+integer part of a coordinate <em>is</em> the cell index and the fraction is the position inside the
+cell. Doom calls the same idea <code>FRACUNIT</code> and multiplies with a small assembly
+routine, <code>FixedMul</code>, because the intermediate product needs 64 bits.</p>
+<div class="controls">
+  <label>a = <input type="number" id="fx-a" value="3.75" step="0.01" style="width:6em"></label>
+  <label>b = <input type="number" id="fx-b" value="-1.2" step="0.01" style="width:6em"></label>
+</div>
+<div class="readout" id="fx-readout"></div>
+<p>Notice that −1.2 can't be stored exactly: the nearest 16.16 value is off by about 0.000006.
+That's small, but these errors pile up. In the originals they show up as walls that “wobble” by a
+pixel when you stand very close.</p>
+</aside>
+
+<h2>Next</h2>
+<p>We can now describe <em>where</em> things are. Next we need to describe <em>which way</em>
+they face: angles, sine and cosine, and the rotation matrix that turns the player.</p>
+</article>
+
+<nav class="steps-nav bottom">
+  <a href="../../index.html">↑ Contents</a>
+  <a href="../02-angles/index.html">Step 2: Angles and rotation →</a>
+</nav>
+
+<script src="../../common/diagram.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>

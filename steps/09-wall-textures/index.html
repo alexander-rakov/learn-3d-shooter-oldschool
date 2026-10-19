@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Textured Walls</title>
+<link rel="stylesheet" href="../../common/style.css">
+</head>
+<body>
+<nav class="steps-nav">
+  <a href="../08-movement/index.html">← Step 8: Movement</a>
+  <a href="../../index.html">↑ Contents</a>
+  <a href="../10-floor-ceiling/index.html">Step 10: Floor and ceiling →</a>
+</nav>
+
+<article>
+<p class="kicker">Part 2 · Step 9</p>
+<h1>Textured walls</h1>
+<p class="lede">Each wall column already has a position along the wall (where the ray hit) and a
+height on screen. Texture mapping is two small linear maps: one from the hit position to a texture
+column, and one from screen rows to texture rows. First, though, we need a texture.</p>
+
+<h2>Making bricks out of maths</h2>
+<p>Wolfenstein's textures are 64 × 64 pixels, and so are ours. Rather than shipping image files, we
+generate them at startup in <code>textures.js</code>. That keeps everything in code you can read and
+tweak, and it's a nice exercise in thinking per-texel.</p>
+<p>A texel at <code>(u, v)</code> (column, row) decides what it is from its coordinates alone:</p>
+<ol>
+  <li><strong>Which brick?</strong> Rows are 16 texels tall, so <code>row = floor(v / 16)</code>.
+  Every other row is shifted by half a brick (16 texels) to get the running-bond pattern:
+  <code>su = (u + shift) mod 64</code>. Bricks are 32 wide, so inside the brick we're at
+  <code>bx = su mod 32</code>, <code>by = v mod 16</code>.</li>
+  <li><strong>Mortar or brick?</strong> The first 2 texels of each brick cell (its top and left) are
+  mortar. Each brick's mortar is shared with its neighbours, so this covers every gap.</li>
+  <li><strong>Emboss.</strong> Inside a brick, look at the distance to each of its four edges. Within
+  2 texels of the top or left edge the texel is brightened (×1.45). Within 2 texels of the bottom or
+  right edge it's darkened (×0.55). Where two edges compete near a corner, the nearer one wins,
+  which gives clean diagonal mitres like a real bevel. Light from the top-left plus a raised border
+  is the oldest trick for making flat pixels look 3D.</li>
+  <li><strong>Variation.</strong> Each brick gets a random tint, and each texel a little noise, from a
+  seeded random generator so the texture is the same every time.</li>
+</ol>
+<pre><code>function bevel(ix, iy, iw, ih, size, light, dark) {
+  const dTop = iy, dLeft = ix, dBottom = ih - 1 - iy, dRight = iw - 1 - ix;
+  const m = Math.min(dTop, dLeft, dBottom, dRight);
+  if (m &gt;= size) return 1;                          // brick face
+  return (dTop === m || dLeft === m) ? light : dark; // lit edge or shadow edge
+}</code></pre>
+<p>Three colour schemes give three wall types: grey stone, red brick and Wolfenstein's iconic blue
+stone. Each is <code>makeBrickTexture(base, mortar, seed)</code> with different inputs.</p>
+
+<h2>u: which texture column</h2>
+<p>DDA told us which grid line we hit, and the hit point is <code>pos + t·rayDir</code>. If we crossed a
+<em>vertical</em> line (<code>side = 0</code>), the wall face runs along y, so the position along it is
+the hit's y coordinate. On a horizontal line it's the x coordinate. We only want the part inside the
+cell:</p>
+<pre><code>let wallX = hit.side === 0 ? p.y + hit.t * rayDirY : p.x + hit.t * rayDirX;
+wallX -= Math.floor(wallX);                 // 0 … 1 across the face
+let texX = Math.floor(wallX * TEX);         // 0 … 63
+if ((hit.side === 0 &amp;&amp; rayDirX &lt; 0) || (hit.side === 1 &amp;&amp; rayDirY &gt; 0)) texX = TEX - 1 - texX;</code></pre>
+<p>The flip on the last line is easy to miss. Facing east, your right hand points to +y, so
+<code>wallX</code> grows left-to-right on screen. Facing west, your right hand points to −y, so it grows
+right-to-left and the texture would be mirrored. Same for north versus south. (With symmetric bricks
+you'd barely notice; with text or an arrow on the wall you would.)</p>
+
+<h2>v: screen rows to texture rows</h2>
+<p>The wall occupies screen rows from <code>wallTop</code> to <code>wallTop + lineHeight</code>, and
+those rows should show texture rows 0 to 64. That's a linear (affine) map:</p>
+<p class="math">texY = (y − wallTop) · (64 / lineHeight)</p>
+<p>Since <code>y</code> goes up by 1 per pixel, <code>texY</code> goes up by a constant
+<code>step = 64 / lineHeight</code>. So instead of a multiply per pixel we add <code>step</code>, a
+pattern that shows up everywhere in software rendering:</p>
+<pre><code>const step = TEX / lineHeight;
+let texPos = (top + 0.5 - wallTop) * step;   // start at the first VISIBLE row's centre
+for (let y = top; y &lt; bottom; y++) {
+  const texY = (texPos | 0) &amp; (TEX - 1);
+  texPos += step;
+  pixels[y * w + x] = tex[texX * TEX + texY];
+}</code></pre>
+<p>Note <code>top</code> versus <code>wallTop</code>. When you stand close to a wall, <code>wallTop</code>
+is negative (the wall extends above the screen), and we clip to row 0. Starting <code>texPos</code> at
+the clipped row, not at 0, is what keeps the texture from sliding around as you approach.</p>
+<p>Why is a linear map correct here, with no perspective correction? Because a wall column is
+<em>vertical</em> in the world, every point in it is at the same depth. Perspective only distorts
+things whose depth varies. Walls in columns and (next step) floors in rows are exactly the two
+directions of constant depth, and that's why this whole engine design is so cheap.</p>
+
+<h3>Why column-major</h3>
+<p>The texture array is stored <em>column by column</em>: texel <code>(u, v)</code> lives at
+<code>u * 64 + v</code>. The inner loop reads one column top to bottom, so its reads are consecutive in
+memory. That made a big difference on a 386 with tiny caches; in JavaScript it mostly keeps the
+index maths simple.</p>
+
+<figure class="demo">
+  <div class="game" id="g-game">
+    <canvas class="view pixels" id="g-view" width="320" height="200"></canvas>
+    <canvas class="minimap" id="g-map" width="240" height="240"></canvas>
+  </div>
+  <canvas id="t-tex" width="300" height="252" style="margin-top:10px"></canvas>
+  <div class="controls">
+    <label><input type="checkbox" id="g-shade" checked> darken side-1 faces</label>
+    <label><input type="checkbox" id="g-uv"> show texture coordinates as colour</label>
+  </div>
+  <div class="readout" id="t-readout"></div>
+  <figcaption>Move as before (click, then <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd>,
+  <kbd>A</kbd> <kbd>D</kbd> strafe). Hover the 3D view to inspect a column: the texture it uses (with the
+  sampled column highlighted), that column as it appears on screen, and the numbers behind it.</figcaption>
+</figure>
+
+<div class="try">
+<ul>
+  <li>Walk right up to a wall: <code>step</code> drops below 1 and each texel covers several pixels.
+  Back away: <code>step</code> exceeds 1 and texels get skipped, so distant walls shimmer as you move.
+  (Wolfenstein shimmered too. Mipmapping came later.)</li>
+  <li>Turn on the coordinate colours. Red increases left to right on every face, whichever direction
+  you look from. That's the flip doing its job.</li>
+</ul>
+</div>
+
+<aside class="retro">
+<h3>Palettes, posts and VSWAP</h3>
+<p>Wolfenstein's walls are 64 × 64 bytes each: palette indices into the game's 256-colour VGA
+palette, not RGB. They live in a file called <code>VSWAP</code>, stored column-major for exactly the
+reason above, since the compiled scalers from step 6 read one 64-texel column and stretch it to the
+column height.</p>
+<p>There is no shading code at all. Every wall texture exists twice in the data, a light version
+for one orientation and a hand-drawn darker version for the other, and the renderer simply picks
+one. We fake it with <code>shade()</code>, which halves the RGB channels.</p>
+<p>Being palette-based also made a classic effect cheap: changing palette entries recolours the
+whole screen instantly. Wolfenstein's red flash when you get hurt and the gold flash when you grab
+treasure are palette shifts, not pixel work.</p>
+</aside>
+
+<h2>Next</h2>
+<p>The walls look right. The floor and ceiling are still flat colour. Texturing them means running
+the camera matrix from step 3 <em>forwards</em>: from a screen pixel back to a point on the floor.</p>
+</article>
+
+<nav class="steps-nav bottom">
+  <a href="../08-movement/index.html">← Step 8: Movement</a>
+  <a href="../10-floor-ceiling/index.html">Step 10: Floor and ceiling →</a>
+</nav>
+
+<script src="../../common/diagram.js"></script>
+<script src="raycaster.js"></script>
+<script src="textures.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>

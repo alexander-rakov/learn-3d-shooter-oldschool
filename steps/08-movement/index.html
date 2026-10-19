@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Movement and Collision</title>
+<link rel="stylesheet" href="../../common/style.css">
+</head>
+<body>
+<nav class="steps-nav">
+  <a href="../07-fisheye/index.html">← Step 7: Fisheye</a>
+  <a href="../../index.html">↑ Contents</a>
+  <a href="../09-wall-textures/index.html">Step 9: Wall textures →</a>
+</nav>
+
+<article>
+<p class="kicker">Part 2 · Step 8</p>
+<h1>Movement and collision</h1>
+<p class="lede">Walking forward, strafing, and not walking through walls. With a grid map,
+collision is just “is there a wall cell under me?”, plus one small trick that makes it feel smooth
+instead of sticky.</p>
+
+<h2>Frame-rate independent movement</h2>
+<p>Monitors refresh at 60, 120 or 144 Hz, and frames sometimes take longer than usual. If we moved the
+player a fixed amount per frame, the game would run at different speeds on different machines. So
+every movement is a <em>speed</em> multiplied by <code>dt</code>, the seconds since the last frame:</p>
+<pre><code>rotatePlayer(p, TURN_SPEED * dt);         // radians per second × seconds
+p.x += p.dirX * MOVE_SPEED * dt;          // cells per second × seconds</code></pre>
+<p>Our <code>animate()</code> helper also clamps <code>dt</code> to 50 ms. If the browser tab was
+in the background for 10 seconds, we don't want the player to teleport through the map on the
+first frame back.</p>
+
+<h2>Forward, back, and strafing</h2>
+<p>Forward is along <code>d</code>. For strafing we need the player's “right”, and we already have it:
+the camera plane <code>p</code> points right (step 3). Normalise it, since its length is
+<code>tan(FOV/2)</code>, not 1:</p>
+<pre><code>let mx = p.dirX * forward + (p.planeX / planeLen) * strafe;
+let my = p.dirY * forward + (p.planeY / planeLen) * strafe;
+const len = Math.hypot(mx, my);   // forward + strafe together would be √2 faster…
+const step = MOVE_SPEED * run * dt / len;   // …so divide it back to speed 1
+tryMove(map, p, mx * step, my * step, radius);</code></pre>
+
+<h2>Collision with a grid</h2>
+<p>Treat the player as a small square of half-size <code>r</code> (0.3 cells here). A position is
+legal if that square doesn't overlap any wall cell. Because walls are whole cells, we only need to
+check the few cells the square's corners fall into:</p>
+<pre><code>function isBlocked(map, x, y, r) {
+  const x0 = Math.floor(x - r), x1 = Math.floor(x + r);
+  const y0 = Math.floor(y - r), y1 = Math.floor(y + r);
+  for (let cy = y0; cy &lt;= y1; cy++)
+    for (let cx = x0; cx &lt;= x1; cx++)
+      if (mapCell(map, cx, cy) !== 0) return true;
+  return false;
+}</code></pre>
+<p>Why a radius at all? Without one, you could put the eye right up against a wall, at
+<code>t ≈ 0</code>. The wall would project to an enormous height, its texture would be magnified into a
+few giant pixels, and the near side of the camera plane could even poke through. Keeping a little
+distance avoids all that.</p>
+
+<h3>Sliding along walls</h3>
+<p>The simplest response to a blocked move is to not move. Try that (untick “slide” below) and walk
+diagonally into a wall: you stop dead, which feels terrible. The fix is to try the two axes
+<strong>separately</strong>:</p>
+<pre><code>function tryMove(map, p, dx, dy, r) {
+  if (!isBlocked(map, p.x + dx, p.y, r)) p.x += dx;   // x on its own
+  if (!isBlocked(map, p.x, p.y + dy, r)) p.y += dy;   // then y on its own
+}</code></pre>
+<p>When you push diagonally into a wall that runs north–south, the x part is blocked but the y part
+isn't, so you glide along the wall at reduced speed, the component of your motion parallel to it.
+That's what lets you take corners without getting stuck. It only works this neatly because walls are
+axis-aligned. Doom's arbitrary-angle walls need a real “project the motion onto the wall line”
+step, which is a dot product (step 1 again).</p>
+
+<figure class="demo">
+  <div class="game" id="g-game">
+    <canvas class="view pixels" id="g-view" width="320" height="200"></canvas>
+    <canvas class="minimap" id="g-map" width="240" height="240"></canvas>
+  </div>
+  <div class="controls">
+    <label><input type="checkbox" id="g-slide" checked> slide along walls</label>
+    <label>radius <input type="range" id="g-radius" min="0.05" max="0.49" step="0.01" value="0.3"><output for="g-radius"></output></label>
+  </div>
+  <div class="readout" id="g-readout"></div>
+  <figcaption>Click the view. <kbd>↑</kbd> <kbd>↓</kbd> / <kbd>W</kbd> <kbd>S</kbd> move,
+  <kbd>A</kbd> <kbd>D</kbd> strafe, <kbd>←</kbd> <kbd>→</kbd> turn, hold <kbd>Shift</kbd> to run. The
+  minimap zooms in on the collision square and outlines the cells <code>isBlocked</code> checks.
+  The square turns red when a move was blocked.</figcaption>
+</figure>
+
+<div class="try">
+<ul>
+  <li>Turn off sliding and try to walk along a corridor wall at a slight angle.</li>
+  <li>Set the radius to 0.05 and walk face-first into a wall. That's what the radius protects you from.</li>
+  <li>A radius of 0.49 makes a one-cell corridor barely passable. Above 0.5 it would be impossible.</li>
+</ul>
+</div>
+
+<aside class="note">There's one subtle bug class we avoid by keeping steps small: if a single move were
+longer than the player's size, you could jump <em>over</em> a thin wall (“tunnelling”). Our speed is
+at most 5.4 cells/s and <code>dt</code> is clamped to 0.05 s, so a step is at most 0.27 cells and that
+can't happen with whole-cell walls.</aside>
+
+<aside class="retro">
+<h3>70 Hz tics and ClipMove</h3>
+<p>Wolfenstein's game logic counts time in <em>tics</em> of 1/70 of a second, matching the VGA refresh
+rate. Each frame it measures how many tics have passed and multiplies all movement by that, which is
+the same frame-rate independence as our <code>dt</code>. On a slow 386 you might get 10 frames per
+second, but you'd still cross a room in the same time, just in bigger jumps.</p>
+<p>Collision lives in <code>ClipMove</code> and <code>TryMove</code>. The player is a box of half-size
+<code>PLAYERSIZE = MINDIST = 0x5800</code> in 16.16 fixed point, about 0.34 tiles, close to our 0.3.
+<code>TryMove</code> checks the tiles under the box's corners (plus nearby actors). If the full move
+fails, <code>ClipMove</code> tries only the x part, then only the y part. That's our sliding, line for
+line. Strafing was there too: hold <kbd>Alt</kbd> and the arrow keys sidestep instead of turning.</p>
+</aside>
+
+<h2>Next</h2>
+<p>Flat-coloured walls are very <em>Hovertank 3D</em> (id Software, 1991). Next: textures, with procedurally generated embossed bricks.</p>
+</article>
+
+<nav class="steps-nav bottom">
+  <a href="../07-fisheye/index.html">← Step 7: Fisheye</a>
+  <a href="../09-wall-textures/index.html">Step 9: Wall textures →</a>
+</nav>
+
+<script src="../../common/diagram.js"></script>
+<script src="raycaster.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>

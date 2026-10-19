@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Fisheye Problem</title>
+<link rel="stylesheet" href="../../common/style.css">
+</head>
+<body>
+<nav class="steps-nav">
+  <a href="../06-projection/index.html">← Step 6: Projection</a>
+  <a href="../../index.html">↑ Contents</a>
+  <a href="../08-movement/index.html">Step 8: Movement →</a>
+</nav>
+
+<article>
+<p class="kicker">Part 2 · Step 7</p>
+<h1>The fisheye problem (and why the fix is free)</h1>
+<p class="lede">Last step's renderer bends straight walls. The cause is subtle: perspective divides by
+<em>depth</em>, not by distance. The fix turns out to be the <code>t</code> that DDA already gives us.</p>
+
+<h2>Distance is not depth</h2>
+<p>Recall from step 3 how a point projects: <code>screenX = W/2 · (1 + u/v)</code>, where
+<code>v</code> is the point's <strong>depth</strong>, the coordinate along the view direction
+<code>d</code>. The projection plane is flat and perpendicular to <code>d</code>, so the similar
+triangles of step 6 are measured along <code>d</code> too. Height on screen is
+<code>projScale / depth</code>.</p>
+<p>In step 6 we divided by the Euclidean distance instead. For the centre column they're the same.
+For a ray at angle φ off-centre, the Euclidean distance to a point is longer than its depth:</p>
+<p class="math">depth = distance · cos φ</p>
+<p>So towards the screen edges we divided by too much, and the walls came out too short. On a straight
+wall facing you, the depth is <em>the same</em> for every column, so the wall should be a perfect
+rectangle. The Euclidean distance grows towards the edges, which produces the bulge.</p>
+
+<figure class="demo">
+  <canvas id="f-top" width="480" height="220"></canvas>
+  <canvas id="f-chart" width="480" height="170" style="margin-top:8px"></canvas>
+  <div class="controls">
+    <label>FOV <input type="range" id="f-fov" min="30" max="150" step="1" value="90" data-unit="°"><output for="f-fov"></output></label>
+  </div>
+  <figcaption>Top: rays hitting a long straight wall. For the highlighted ray,
+  <span style="color:#f8961e">orange</span> is its Euclidean length and
+  <span style="color:#4cc9f0">blue</span> is its depth along <span style="color:#ef476f">d</span>.
+  Bottom: the wall's top and bottom edge across the screen for each measure. Drag the eye or turn
+  it with the <span style="color:#ef476f">d</span> handle. With depth the edges are always
+  <strong>straight lines</strong>, even when the wall is at an angle. With Euclidean distance they curve.</figcaption>
+</figure>
+
+<h3>Why the edges are straight</h3>
+<p>A nice fact falls out of this. Along a straight wall, depth changes <em>linearly</em> with position.
+So does the screen coordinate, and <code>1 / depth</code> turns out to be linear in screen x. Since a
+column's height is <code>projScale / depth</code>, the top and bottom edges of any flat wall are
+straight lines on screen. That's what a pinhole camera does. A fisheye lens doesn't, and neither did our
+step-6 renderer.</p>
+
+<h2>The fix: DDA's t is already the depth</h2>
+<p>We could compute the angle φ for every column and multiply by <code>cos φ</code>. Many raycaster
+tutorials do exactly that. But look at the ray we built in step 3:</p>
+<p class="math">rayDir = d + c·p</p>
+<p>The hit point is <code>pos + t·rayDir</code>. Its depth is its offset from the eye, dotted with
+<code>d</code>:</p>
+<p class="math">depth = (t·rayDir) · d = t·(d·d) + t·c·(p·d) = t·1 + t·c·0 = t</p>
+<p>because <code>d</code> has length 1 and <code>p</code> is perpendicular to it. In other words, a ray
+built from the camera plane has a component of exactly 1 along <code>d</code>. The ray parameter
+<code>t</code> from DDA <em>is</em> the perpendicular distance. The fix is to <strong>delete</strong>
+the <code>Math.hypot</code>:</p>
+<pre><code>// step 6 (fisheye):
+const dist = hit.t * Math.hypot(rayDirX, rayDirY);
+// step 7 (correct): t already is the depth
+const dist = hit.t;</code></pre>
+<p>That's one less square root per column, and it's also the reason for not normalising the ray
+direction. This step's <code>raycaster.js</code> keeps both versions behind an option so you can
+compare them; it computes the depth as <code>t · (rayDir · d)</code>, which is just <code>t</code>
+for plane rays.</p>
+
+<h2>The other half: angle-spaced rays</h2>
+<p>Step 3 claimed rays should be spaced evenly <em>on the plane</em>, not evenly in angle. Here's
+why. Each column's height is computed correctly from its own ray, but if the rays aren't where
+that column actually looks, everything gets squeezed sideways. A flat screen gives each degree near the
+edges <em>more</em> columns than each degree in the middle (the plane is further from the eye out there).
+Equal angles give every degree the same number of columns, so compared to a true projection the middle
+is stretched and the sides are compressed. Straight lines bend again, more gently than the fisheye but visibly at wide FOVs.</p>
+
+<figure class="demo">
+  <div class="game" id="g-game">
+    <canvas class="view pixels" id="g-view" width="320" height="200"></canvas>
+    <canvas class="minimap" id="g-map" width="240" height="240"></canvas>
+  </div>
+  <div class="controls">
+    <label>distance
+      <select id="g-dist">
+        <option value="perpendicular">perpendicular (t)</option>
+        <option value="euclidean">euclidean (step 6)</option>
+      </select>
+    </label>
+    <label>rays
+      <select id="g-rays">
+        <option value="plane">even on plane</option>
+        <option value="angle">even in angle</option>
+      </select>
+    </label>
+    <label>FOV <input type="range" id="g-fov" min="40" max="140" step="1" value="66" data-unit="°"><output for="g-fov"></output></label>
+  </div>
+  <figcaption>Same controls as before: click the view, <kbd>↑</kbd> <kbd>↓</kbd> to move,
+  <kbd>←</kbd> <kbd>→</kbd> to turn. Stand in front of a long wall and flip the options.</figcaption>
+</figure>
+
+<div class="try">
+<ul>
+  <li>Euclidean distance, 66° FOV, facing the long wall at the end of the starting corridor:
+  it bulges. Switch to perpendicular: flat.</li>
+  <li>Perpendicular distance, “even in angle”, FOV 130°: walk along a wall and watch its edge
+  bend near the screen sides.</li>
+  <li>Push the FOV to 140° with everything correct: no bending, but extreme stretching at the
+  edges. That's real perspective at a wide angle; wide-angle photos look the same.</li>
+</ul>
+</div>
+
+<aside class="retro">
+<h3>Wolfenstein's depth, and its odd FOV</h3>
+<p>Wolfenstein traces by angle (step 3's <code>pixelangle[]</code>), so it doesn't get depth for free
+the way plane rays do. Instead, after finding a hit, its <code>CalcHeight</code> routine projects the hit
+point's offset onto the view direction: a dot product with the view's cosine and sine, in fixed point.
+That's the same perpendicular depth, computed explicitly.</p>
+<p>Because the per-column angles come from <code>atan</code> of evenly spaced plane positions, its rays
+are plane-spaced as well, so straight walls stay straight.</p>
+<p>One thing we ignore: 320 × 200 was shown on a 4:3 monitor, so real VGA pixels were about 20% taller
+than wide. Art of that era was drawn with that stretch in mind; on today's square pixels it all looks
+slightly squashed.</p>
+</aside>
+
+<h2>Next</h2>
+<p>The picture is correct. Now let's make it a place you can walk around in without walking
+<em>through</em> it: proper movement and collision.</p>
+</article>
+
+<nav class="steps-nav bottom">
+  <a href="../06-projection/index.html">← Step 6: Projection</a>
+  <a href="../08-movement/index.html">Step 8: Movement →</a>
+</nav>
+
+<script src="../../common/diagram.js"></script>
+<script src="raycaster.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>

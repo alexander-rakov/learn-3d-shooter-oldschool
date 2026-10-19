@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ray Marching</title>
+<link rel="stylesheet" href="../../common/style.css">
+</head>
+<body>
+<nav class="steps-nav">
+  <a href="../03-camera/index.html">← Step 3: The camera</a>
+  <a href="../../index.html">↑ Contents</a>
+  <a href="../05-dda/index.html">Step 5: DDA →</a>
+</nav>
+
+<article>
+<p class="kicker">Part 1 · Step 4</p>
+<h1>The grid, and the naive way to find a wall</h1>
+<p class="lede">Each ray has to answer one question: <em>how far do I travel before I enter a
+wall cell?</em> Here's the obvious answer, small steps until you bump into something, and the
+two reasons no 1992 engine could afford it.</p>
+
+<h2>The map</h2>
+<p>The level is a grid of numbers: 0 for empty, anything else for a wall (the number later picks
+the texture). We write maps as strings because they're easy to edit, and store them as a flat
+array indexed by <code>y * width + x</code>:</p>
+<pre><code>const map = parseMap([
+  '############',
+  '#..........#',
+  '#..##...#..#',
+  '#...#......#',
+  '#.......##.#',
+  '#..#.......#',
+  '#......#...#',
+  '############',
+]);
+
+function isWall(map, x, y) {
+  const cx = Math.floor(x), cy = Math.floor(y);         // which cell is (x, y) in?
+  if (cx &lt; 0 || cy &lt; 0 || cx &gt;= map.w || cy &gt;= map.h) return true;  // outside = solid
+  return map.cells[cy * map.w + cx] !== 0;
+}</code></pre>
+
+<h2>Ray marching</h2>
+<p>A ray is <code>P(t) = pos + t·dir</code> (step 1). The simplest way to find where it hits:
+start at <code>t = 0</code>, take a small step, check the cell, repeat.</p>
+<pre><code>function marchRay(map, posX, posY, dirX, dirY, stepSize) {
+  const len = Math.hypot(dirX, dirY);
+  dirX /= len; dirY /= len;                 // unit direction: t is now distance in cells
+  for (let t = 0; t &lt; 50; t += stepSize) {
+    if (isWall(map, posX + t * dirX, posY + t * dirY)) return t;
+  }
+  return Infinity;
+}</code></pre>
+<p>It works. Play with the step size below and you'll find two problems.</p>
+
+<figure class="demo">
+  <canvas id="m-canvas" width="480" height="320"></canvas>
+  <div class="controls">
+    <label>step size <input type="range" id="m-step" min="0.02" max="0.8" step="0.01" value="0.3"><output for="m-step"></output></label>
+    <label><input type="checkbox" id="m-fan"> fan of 40 rays</label>
+  </div>
+  <div class="readout" id="m-readout"></div>
+  <figcaption>Drag the <span style="color:#ffd166">eye</span> and the
+  <span style="color:#4cc9f0">aim</span> point. Blue dots are the samples, the
+  <span style="color:#ff5d5d">red</span> cell is where marching thinks it hit, and the white ring
+  is the true hit point.</figcaption>
+</figure>
+
+<h3>Problem 1: accuracy</h3>
+<p>The march stops at the first sample <em>inside</em> a wall, which can be up to one step past
+the true surface. That error goes straight into the wall's distance, and so into its height on
+screen. With steps of 0.3 cells, walls shimmer and bulge as you move.</p>
+<p>Worse, a ray that only clips the corner of a wall cell can step right over it and report a
+wall further away, or none at all. Turn on the fan, set a big step size, and look at the corners.</p>
+
+<h3>Problem 2: cost</h3>
+<p>The fix for accuracy is smaller steps, and the cost goes up in proportion. A wall 10 cells away
+needs 1,000 checks at a step of 0.01, and we need 320 rays per frame. That's 320,000 map lookups
+per frame, about ten million per second at 30 fps. On a 1992 PC that's out of the question. (Even
+today it's wasteful.)</p>
+
+<h2>The key observation</h2>
+<p>Look at the grid. A ray can only enter a new cell at the moment it <strong>crosses a grid
+line</strong>. Between two crossings it stays in the same cell, so all the samples in between are
+wasted. If we could jump from one grid line crossing to the next, we'd check exactly the cells the
+ray passes through, no more and no fewer, and find the exact point where it enters the wall.</p>
+<p>That's the algorithm in the next step.</p>
+
+<aside class="retro">
+<h3>The cycle budget</h3>
+<p>A 386 at 25 MHz runs roughly 25 million clock cycles per second, and a simple instruction takes
+a few cycles. At 30 frames per second that's under a million cycles per frame <em>for everything</em>:
+game logic, sound, casting 320 rays, and writing 64,000 pixels to the screen. That leaves a
+few thousand cycles per column. A ray march with hundreds of steps per ray doesn't fit. Wolfenstein
+was designed for exactly this budget, with every inner loop hand-written in assembly.</p>
+<p>Ray marching isn't dead, by the way: modern “signed distance field” renderers march rays with
+<em>variable</em> step sizes, using a distance function to know how far it's safe to jump. Same
+idea, smarter step.</p>
+</aside>
+
+<h2>Next</h2>
+<p>Stepping from grid line to grid line: the DDA algorithm.</p>
+</article>
+
+<nav class="steps-nav bottom">
+  <a href="../03-camera/index.html">← Step 3: The camera</a>
+  <a href="../05-dda/index.html">Step 5: DDA →</a>
+</nav>
+
+<script src="../../common/diagram.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>

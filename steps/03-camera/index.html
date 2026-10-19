@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Camera</title>
+<link rel="stylesheet" href="../../common/style.css">
+</head>
+<body>
+<nav class="steps-nav">
+  <a href="../02-angles/index.html">← Step 2: Angles</a>
+  <a href="../../index.html">↑ Contents</a>
+  <a href="../04-ray-marching/index.html">Step 4: Ray marching →</a>
+</nav>
+
+<article>
+<p class="kicker">Part 1 · Step 3</p>
+<h1>The camera: direction, screen plane and camera space</h1>
+<p class="lede">A raycaster shoots one ray per column of pixels. This step works out exactly
+which direction each of those rays goes, and builds the 2 × 2 matrix that converts between world
+coordinates and the camera's own coordinates. That matrix comes back for floors (step 10) and
+sprites (Part 3).</p>
+
+<h2>Two vectors make a camera</h2>
+<p>The camera is described by three things:</p>
+<ul>
+  <li><strong>pos</strong>: where the eye is.</li>
+  <li><strong>d</strong>: the direction it looks in, a unit vector.</li>
+  <li><strong>p</strong>: the <em>camera plane</em>, a vector perpendicular to <code>d</code>
+  pointing to the viewer's right: <code>p = perp(d) · tan(FOV/2)</code>.</li>
+</ul>
+<p>Picture the screen as a flat window held one unit in front of the eye. Its centre is at
+<code>pos + d</code>; its left edge is at <code>pos + d − p</code> and its right edge at
+<code>pos + d + p</code>. Every pixel column of the screen is a point on that window, and the ray
+for that column goes from the eye through it.</p>
+<p>If the screen is <code>W</code> pixels wide, column <code>x</code> sits at a position
+<code>c</code> between −1 (left edge) and +1 (right edge):</p>
+<p class="math">c = 2·x / W − 1 &nbsp;&nbsp;&nbsp; rayDir(x) = d + c·p</p>
+<p>The field of view follows from the triangle formed by the eye, the window centre and the
+window edge: the half-angle has tangent <code>|p| / |d| = |p|</code>. So <code>|p| = tan(FOV/2)</code>.
+A 66° FOV gives <code>|p| ≈ 0.65</code>; 90° gives exactly 1.</p>
+
+<pre><code>// One ray per screen column
+for (let x = 0; x &lt; W; x++) {
+  const c = 2 * x / W - 1;              // -1 … +1 across the screen
+  const rayDirX = dirX + planeX * c;
+  const rayDirY = dirY + planeY * c;
+  // … cast this ray (steps 4–5) and draw a wall column (step 6)
+}</code></pre>
+
+<h3>Rays are evenly spaced on the plane, not in angle</h3>
+<p>Note what we did <em>not</em> do: divide the FOV into W equal angles. The screen is flat, so
+equal pixel steps are equal steps along the <em>plane</em>, and the angles between neighbouring
+rays get smaller towards the edges. Use equal angles and straight walls come out bent; step 7
+shows this.</p>
+
+<h3>Turning the camera</h3>
+<p>To turn by α, rotate <em>both</em> vectors with the rotation matrix from step 2. Since
+rotation preserves lengths and right angles, <code>p</code> stays perpendicular to <code>d</code>
+and the FOV stays the same:</p>
+<pre><code>[dirX,   dirY]   = rotate(dirX, dirY, α)
+[planeX, planeY] = rotate(planeX, planeY, α)</code></pre>
+<p>This is why many raycasters (including ours) store the camera as two vectors instead of an
+angle: no trigonometry is needed per frame, just one rotation when you press a key.</p>
+
+<h2>Camera space</h2>
+<p>The other direction is just as important: given a point <code>q</code> in the world (an
+enemy, a lamp, the corner of a wall), where does it appear on screen?</p>
+<p>The trick is to describe <code>q</code> in the camera's own coordinates. Use <code>p</code> and
+<code>d</code> as basis vectors and find <code>u, v</code> such that</p>
+<p class="math">q − pos = u·p + v·d</p>
+<ul>
+  <li><strong>v</strong> is the <em>depth</em>: how far in front of the camera the point is.
+  Negative means behind.</li>
+  <li><strong>u</strong> is how far to the side it is, in units of <code>p</code>.</li>
+</ul>
+<p>Written as a matrix, the two basis vectors become the columns of the
+<strong>camera matrix</strong> M:</p>
+<p class="math">q − pos = M · (u, v)<sup>T</sup>, &nbsp;&nbsp;
+M = [ p<sub>x</sub> &nbsp; d<sub>x</sub> ; &nbsp; p<sub>y</sub> &nbsp; d<sub>y</sub> ]</p>
+<p><strong>M</strong> takes camera coordinates to world coordinates. To go the other way we invert
+it. For a 2 × 2 matrix the inverse is: swap the diagonal, negate the off-diagonal, divide by the
+determinant.</p>
+<p class="math">(u, v)<sup>T</sup> = M<sup>−1</sup> · (q − pos), &nbsp;&nbsp;
+M<sup>−1</sup> = <span class="n">1/det</span> · [ d<sub>y</sub> &nbsp; −d<sub>x</sub> ; &nbsp;
+−p<sub>y</sub> &nbsp; p<sub>x</sub> ], &nbsp;&nbsp; det = p<sub>x</sub>d<sub>y</sub> − d<sub>x</sub>p<sub>y</sub></p>
+<pre><code>const rx = qx - posX, ry = qy - posY;            // q relative to the eye
+const invDet = 1 / (planeX * dirY - dirX * planeY);
+const u = invDet * ( dirY   * rx - dirX   * ry); // sideways, in units of p
+const v = invDet * (-planeY * rx + planeX * ry); // depth</code></pre>
+<p>(Since <code>p ⟂ d</code> and <code>|d| = 1</code>, this simplifies to <code>v = (q − pos)·d</code>
+and <code>u = (q − pos)·p / |p|²</code>, which are dot products, as in step 1. The general inverse is
+worth knowing because it still works if you ever skew the camera.)</p>
+
+<h3>Perspective in one division</h3>
+<p>Now the projection. The ray through column <code>c</code> is <code>d + c·p</code>. In camera
+coordinates that's the set of points where <code>u / v = c</code>. So a point with camera
+coordinates <code>(u, v)</code> lands on</p>
+<p class="math">c = u / v &nbsp;&nbsp; ⇒ &nbsp;&nbsp; screenX = (W/2) · (1 + u / v)</p>
+<p>Dividing by depth is what perspective <em>is</em>: things twice as far away shift half as
+much. Step 6 applies the same division to wall heights.</p>
+
+<figure class="demo">
+  <canvas id="c-canvas" width="480" height="420"></canvas>
+  <div class="controls">
+    <label>FOV <input type="range" id="c-fov" min="20" max="140" step="1" value="66" data-unit="°"><output for="c-fov"></output></label>
+    <label>rays <input type="range" id="c-rays" min="2" max="40" step="1" value="9"><output for="c-rays"></output></label>
+  </div>
+  <div class="readout" id="c-readout"></div>
+  <figcaption>Drag the <span style="color:#ffd166">eye</span> to move, the
+  <span style="color:#ef476f">d</span> tip to turn, and the white <strong>target</strong> point.
+  The dashed lines decompose the target into <code>v·d</code> then <code>u·p</code>. The strip at
+  the bottom is the screen: ticks are the ray columns, the white marker is where the target appears.</figcaption>
+</figure>
+
+<div class="try">
+<ul>
+  <li>Move the target behind the eye: <code>v</code> goes negative and the point disappears from
+  the screen. Without a <code>v &gt; 0</code> check, sprites behind you would show up mirrored.</li>
+  <li>Move the target straight away from the eye along one ray. <code>u</code> and <code>v</code>
+  both grow, but <code>u / v</code> (and the screen column) stays put.</li>
+  <li>Widen the FOV towards 140° and watch how unevenly the rays fan out in angle, even though
+  they're evenly spaced along the green plane.</li>
+</ul>
+</div>
+
+<aside class="retro">
+<h3>Per-column angle tables and a shrinkable screen</h3>
+<p>Wolfenstein 3D tracks the player by <em>angle</em> rather than by vectors, so it needs the
+angle of each column's ray relative to the view direction. That's <code>atan(c · tan(FOV/2))</code>,
+the same plane-spaced rays as ours. It precomputes these once into a table called
+<code>pixelangle[]</code> (in <code>CalcProjection</code>), so at runtime each column's ray angle
+is just <code>viewangle + pixelangle[x]</code>.</p>
+<p>The view width wasn't fixed either. The options menu had a “Change View” setting that shrank
+the 3D window (with a border around it) so slow PCs had fewer columns to cast and draw. Changing
+it rebuilt the projection tables.</p>
+</aside>
+
+<h2>Next</h2>
+<p>We know which direction every ray goes. Now we need to find where it hits a wall. First the
+obvious way (and why it's bad), then the clever way.</p>
+</article>
+
+<nav class="steps-nav bottom">
+  <a href="../02-angles/index.html">← Step 2: Angles</a>
+  <a href="../04-ray-marching/index.html">Step 4: Ray marching →</a>
+</nav>
+
+<script src="../../common/diagram.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>

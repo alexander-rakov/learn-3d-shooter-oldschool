@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Floor and Ceiling</title>
+<link rel="stylesheet" href="../../common/style.css">
+</head>
+<body>
+<nav class="steps-nav">
+  <a href="../09-wall-textures/index.html">← Step 9: Wall textures</a>
+  <a href="../../index.html">↑ Contents</a>
+  <span class="planned">Step 11: Sprites</span>
+</nav>
+
+<article>
+<p class="kicker">Part 2 · Step 10</p>
+<h1>Floor and ceiling casting</h1>
+<p class="lede">Walls are drawn in vertical columns, because every point in a wall column is at the
+same depth. Floors are the other way round: every pixel in a screen <em>row</em> sees the floor at the
+same depth. So we draw them row by row, and use the camera matrix to go from a pixel to a point
+on the floor.</p>
+
+<h2>One row, one depth</h2>
+<p>Back to the side view from step 6. The eye is at height <code>EYE_HEIGHT = 0.5</code> above the
+floor. A pixel row that is <code>r</code> rows below the horizon looks down at the floor along a line
+that drops <code>r / projScale</code> per unit of depth, by the same similar triangles as before. It
+reaches the floor, 0.5 below the eye, at depth</p>
+<p class="math">rowDist = EYE_HEIGHT · projScale / r</p>
+<p>Sanity check: a wall at depth <code>z</code> has its bottom edge <code>projScale / z / 2</code> rows below
+the horizon. Plug that in for <code>r</code> and <code>rowDist = z</code>. The floor meets the wall
+exactly where the wall ends. Rows near the horizon (small <code>r</code>) are far away; the bottom row is
+closest.</p>
+<p>The ceiling is the mirror image: row <code>h − 1 − y</code> is as far above the horizon as row
+<code>y</code> is below it, so it has the same <code>rowDist</code>, and it's directly above the same
+floor point. One computation serves both.</p>
+
+<h2>From pixel to world point: the camera matrix</h2>
+<p>Inside a row, pixel <code>x</code> looks along the same ray as the wall column <code>x</code>:
+<code>d + c·p</code>, with <code>c = 2x/W − 1</code>. Going a depth of <code>rowDist</code> along it
+(remember from step 7: <code>t</code> along a plane ray <em>is</em> depth), the floor point is</p>
+<p class="math">world = pos + rowDist · (d + c·p) = pos + rowDist · M · (c, 1)<sup>T</sup>, &nbsp;&nbsp;
+M = [ p<sub>x</sub> &nbsp; d<sub>x</sub> ; &nbsp; p<sub>y</sub> &nbsp; d<sub>y</sub> ]</p>
+<p>That's the camera matrix from step 3, used <em>forwards</em>. In step 3, <code>M⁻¹</code> took a world
+point to camera coordinates <code>(u, v)</code> so we could find its pixel. Here <code>M</code> takes
+camera coordinates, <code>(c·rowDist, rowDist)</code>, back to the world so we can find what a pixel
+shows. Same matrix, opposite directions: world → screen for objects, screen → world for surfaces.</p>
+
+<h3>Linear along the row</h3>
+<p>For a fixed row, <code>rowDist</code> is constant, and <code>world</code> is a linear function of
+<code>c</code>. Moving one pixel right changes <code>c</code> by <code>2/W</code>, which moves the world
+point by the constant vector <code>rowDist · p · 2/W</code>. So, exactly like the wall's
+<code>texPos += step</code>, each pixel costs two additions:</p>
+<pre><code>for (let y = h / 2; y &lt; h; y++) {
+  const rowDist = EYE_HEIGHT * projScale / (y + 0.5 - h / 2);
+  let fx = p.x + rowDist * (p.dirX - p.planeX);      // world point at c = -1 (x = 0)
+  let fy = p.y + rowDist * (p.dirY - p.planeY);
+  const stepX = rowDist * 2 * p.planeX / w;          // world step per pixel
+  const stepY = rowDist * 2 * p.planeY / w;
+
+  for (let x = 0; x &lt; w; x++) {
+    const tx = ((fx * TEX) | 0) &amp; (TEX - 1);         // fractional part × 64
+    const ty = ((fy * TEX) | 0) &amp; (TEX - 1);
+    pixels[y * w + x]           = FLOOR_TEXTURE[tx * TEX + ty];
+    pixels[(h - 1 - y) * w + x] = CEILING_TEXTURE[tx * TEX + ty];
+    fx += stepX;  fy += stepY;
+  }
+}</code></pre>
+<p>The texture lookup is the neatest part. A floor tile covers exactly one map cell, so the texture
+coordinate is just the <em>fractional part of the world position</em> × 64. <code>&amp; 63</code> keeps
+the low six bits, which is the same as “mod 64” for a power of two. The tile repeats in every cell
+for free.</p>
+
+<h3>Draw order</h3>
+<p>We fill the whole floor and ceiling first, then draw the wall columns on top. That's simple but
+wasteful: every pixel behind a wall gets a floor texel that's immediately overwritten. A tighter
+engine would draw floor only below each column's <code>bottom</code>. For 320 × 200 in JavaScript it
+doesn't matter, but in 1992 it was exactly the kind of thing that did.</p>
+
+<figure class="demo">
+  <div class="game" id="g-game">
+    <canvas class="view pixels" id="g-view" width="320" height="200"></canvas>
+    <canvas class="minimap" id="g-map" width="240" height="240"></canvas>
+  </div>
+  <div class="controls">
+    <label><input type="checkbox" id="g-flat"> Wolfenstein-style flat floor &amp; ceiling</label>
+    <label><input type="checkbox" id="g-shade" checked> darken side-1 faces</label>
+  </div>
+  <div class="readout" id="f-readout"></div>
+  <figcaption>Click the view to move (<kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd>,
+  <kbd>A</kbd> <kbd>D</kbd>, <kbd>Shift</kbd>). Hover the floor or ceiling: the readout runs the
+  matrix computation for that pixel, and the minimap marks the world point it shows. The tile
+  borders line up with the map grid because one tile = one cell.</figcaption>
+</figure>
+
+<div class="try">
+<ul>
+  <li>Hover pixels in the same row: <code>rowDist</code> doesn't change, only <code>c</code> does.
+  Hover just below the horizon: <code>rowDist</code> shoots up.</li>
+  <li>Look at the far floor: the tile borders turn into flickering noise. That's aliasing again, much
+  worse than on walls because each pixel steps across many texels. It's why later engines filtered
+  or mipmapped textures.</li>
+  <li>Toggle the flat mode to see Wolfenstein's look: arguably clearer, and much cheaper.</li>
+</ul>
+</div>
+
+<aside class="retro">
+<h3>Wolfenstein didn't do this. Doom did, sideways.</h3>
+<p>Wolfenstein 3D's floor and ceiling are solid colours, cleared before the walls are drawn
+(step 6). Texturing them costs a texture lookup for most of the screen, which a 386 couldn't afford
+on top of everything else. Raycasters that came soon after, such as <em>Blake Stone: Aliens of
+Gold</em> (1993), added textured floors and ceilings using row-by-row casting like ours.</p>
+<p>Doom draws its floors (“visplanes”) the same way: as horizontal <em>spans</em>, runs of pixels in
+one screen row, because a row of a horizontal surface has constant depth. Its <code>R_MapPlane</code>
+computes the distance for the row from a table, steps through the flat's texture with fixed-point
+increments, and uses the distance to pick a lighting level. Part 4 of this series will get there. The
+basic trick, “constant depth along a row, so step linearly”, is the one you've just seen.</p>
+</aside>
+
+<h2>What we have, and what's next</h2>
+<p>That's the end of Part 2. From two vectors and a grid we've built a complete Wolfenstein-style
+renderer: exact ray casting, correct perspective, collision, and textured walls, floor and ceiling,
+all in about 300 lines of engine code.</p>
+<p>What's missing is everything that makes it a <em>game</em>: objects and enemies (sprites, which need
+the camera-space transform from step 3 and a depth buffer), doors, and shooting. That's Part 3; see
+the <a href="../../index.html">contents</a> for the plan.</p>
+</article>
+
+<nav class="steps-nav bottom">
+  <a href="../09-wall-textures/index.html">← Step 9: Wall textures</a>
+  <a href="../../index.html">↑ Contents</a>
+</nav>
+
+<script src="../../common/diagram.js"></script>
+<script src="raycaster.js"></script>
+<script src="textures.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>
