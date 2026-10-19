@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Perspective Projection</title>
+<link rel="stylesheet" href="../../common/style.css">
+</head>
+<body>
+<nav class="steps-nav">
+  <a href="../05-dda/index.html">← Step 5: DDA</a>
+  <a href="../../index.html">↑ Contents</a>
+  <a href="../07-fisheye/index.html">Step 7: Fisheye →</a>
+</nav>
+
+<article>
+<p class="kicker">Part 2 · Step 6</p>
+<h1>Perspective projection: from distance to wall height</h1>
+<p class="lede">We can find where each ray hits a wall. Turning that into a picture needs one more
+idea: things that are further away look smaller, in exact proportion to their distance. That's
+one division per column, and it gives us our first 3D frame.</p>
+
+<h2>Similar triangles</h2>
+<p>Look at the world from the <em>side</em>. The eye is at height 0.5 (half a wall; Wolfenstein's
+walls are one cell high and the eye is in the middle), and the projection plane, our screen, is
+one unit in front of it. A wall of height 1 stands at distance <code>z</code>.</p>
+<p>Draw lines from the eye to the top and bottom of the wall. Where they pierce the plane is where
+the wall appears on screen. The small triangle (eye → plane) and the big one (eye → wall) have the
+same angles, so their sides are in proportion:</p>
+<p class="math">height on plane / 1 = wall height / z &nbsp;&nbsp; ⇒ &nbsp;&nbsp; height on plane = 1 / z</p>
+
+<figure class="demo">
+  <canvas id="s-canvas" width="560" height="260"></canvas>
+  <div class="controls">
+    <label>wall distance z <input type="range" id="s-z" min="0.4" max="3.8" step="0.01" value="1.6"><output for="s-z"></output></label>
+  </div>
+  <figcaption>Side view. The eye is on the left, the <span style="color:#06d6a0">green</span> line is the
+  projection plane at distance 1, and the wall is at distance z. On the right is the resulting column
+  of pixels on a 200-pixel-tall screen.</figcaption>
+</figure>
+
+<h2>From plane units to pixels</h2>
+<p>Now convert “units on the plane” to pixels. In step 3 we said the plane's half-width is
+<code>|p| = tan(FOV/2)</code> and that it spans half the screen, <code>W/2</code> pixels. So one
+unit on the plane is</p>
+<p class="math">projScale = (W/2) / |p| &nbsp;pixels</p>
+<p>Using the same scale vertically keeps pixels square. With W = 320 and a 66° FOV, projScale ≈ 246:
+a wall one unit away is 246 pixels tall, which is taller than our 200-pixel screen, as it should be
+when you stand that close. The whole projection is:</p>
+<p class="math">lineHeight = projScale / z</p>
+<p>The wall column is centred on the horizon (screen row H/2, because the eye is at mid-wall
+height). Everything above it is ceiling, everything below is floor.</p>
+
+<h2>Our first frame</h2>
+<p>Put it all together. For every column: build the ray (step 3), cast it (step 5), turn the distance
+into a height, and fill one vertical strip of pixels.</p>
+<pre><code>for (let x = 0; x &lt; w; x++) {
+  const c = 2 * x / w - 1;
+  const rayDirX = p.dirX + p.planeX * c;
+  const rayDirY = p.dirY + p.planeY * c;
+  const hit = castRay(map, p.x, p.y, rayDirX, rayDirY);
+
+  const dist = hit.t * Math.hypot(rayDirX, rayDirY);    // Euclidean distance
+  const lineHeight = projScale / dist;
+  const top    = Math.max(0, Math.floor(h / 2 - lineHeight / 2));
+  const bottom = Math.min(h, Math.floor(h / 2 + lineHeight / 2));
+
+  let color = WALL_COLORS[hit.cell];
+  if (hit.side === 1) color = shade(color);   // darker on N/S faces
+
+  for (let y = 0; y &lt; top; y++)       pixels[y * w + x] = CEILING_COLOR;
+  for (let y = top; y &lt; bottom; y++)  pixels[y * w + x] = color;
+  for (let y = bottom; y &lt; h; y++)    pixels[y * w + x] = FLOOR_COLOR;
+}</code></pre>
+<p>Two details:</p>
+<ul>
+  <li><strong>Side shading.</strong> Faces hit through a horizontal grid line (<code>side = 1</code>)
+  get half brightness. Without lighting, all walls would be the same flat colour and corners would
+  vanish. This one trick gives the classic look.</li>
+  <li><strong>Pixels, not drawing commands.</strong> We render into a <code>Uint32Array</code> that
+  shares memory with an <code>ImageData</code> (one 32-bit integer per pixel), then copy it to a
+  320 × 200 canvas that CSS scales up with <code>image-rendering: pixelated</code>. Every pixel is
+  ours, just like writing to VGA memory.</li>
+</ul>
+
+<figure class="demo">
+  <div class="game" id="g-game">
+    <canvas class="view pixels" id="g-view" width="320" height="200"></canvas>
+    <canvas class="minimap" id="g-map" width="240" height="240"></canvas>
+  </div>
+  <figcaption>Click the view, then use <kbd>↑</kbd> <kbd>↓</kbd> (or <kbd>W</kbd> <kbd>S</kbd>) to
+  move and <kbd>←</kbd> <kbd>→</kbd> to turn. There's no collision yet, so you can walk into walls.
+  The minimap shows the rays for every 8th column.</figcaption>
+</figure>
+
+<p><strong>Something's not right.</strong> Walk up to a long straight wall and turn left and right.
+It bulges: the middle looks closer than the ends, as if seen through a fisheye lens. The
+distance we used, the straight-line Euclidean one, seems like the obviously correct choice, so why
+is it wrong? That's the next step.</p>
+
+<aside class="retro">
+<h3>VGA mode 13h, and compiled scalers</h3>
+<p>Wolfenstein ran in VGA's 320 × 200, 256-colour mode. In the simple version of that mode
+(“mode 13h”) the screen is just 64,000 bytes of memory starting at address <code>A000:0000</code>,
+one byte per pixel, which is a palette index. Wolfenstein actually used an “unchained” variant
+(often called Mode X style), which splits memory into four planes. That's awkward for drawing
+single pixels, but it allows double buffering: draw the next frame off-screen, then flip.</p>
+<p>The wall columns were drawn by <strong>compiled scalers</strong>. At startup the game
+<em>generated machine code</em>, one routine for every possible column height. Each routine is a
+fully unrolled list of “copy texel <em>i</em> to row <em>j</em>” instructions, with no loop,
+no counter, and no fractional stepping. Drawing a column meant jumping into the routine for its
+height. That's self-modifying-code-era performance tuning, and it took a noticeable chunk of
+the 640 KB of memory.</p>
+<p>The ceiling and floor were never “drawn” at all: Wolfenstein clears the view to two solid
+colours each frame, like our version here. (Ceiling colours vary per level; the floor is always
+the same dark grey.)</p>
+</aside>
+</article>
+
+<nav class="steps-nav bottom">
+  <a href="../05-dda/index.html">← Step 5: DDA</a>
+  <a href="../07-fisheye/index.html">Step 7: Fisheye →</a>
+</nav>
+
+<script src="../../common/diagram.js"></script>
+<script src="raycaster.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>

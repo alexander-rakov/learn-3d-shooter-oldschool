@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Angles and Rotation</title>
+<link rel="stylesheet" href="../../common/style.css">
+</head>
+<body>
+<nav class="steps-nav">
+  <a href="../01-vectors/index.html">← Step 1: Vectors</a>
+  <a href="../../index.html">↑ Contents</a>
+  <a href="../03-camera/index.html">Step 3: The camera →</a>
+</nav>
+
+<article>
+<p class="kicker">Part 1 · Step 2</p>
+<h1>Angles, sine, cosine and rotation</h1>
+<p class="lede">The player has a position and a facing direction. Pressing ← or → turns them.
+This step covers how to turn an angle into a direction vector and back, and how a
+2 × 2 <em>rotation matrix</em> turns a vector without ever storing an angle.</p>
+
+<h2>From angle to direction</h2>
+<p>Put a unit vector at angle θ, measured from the +x axis. Its tip lies on the unit circle, at</p>
+<p class="math">dir(θ) = (cos θ, sin θ)</p>
+<p>That is all cosine and sine <em>are</em> here: the x and y components of a unit vector pointing
+at angle θ. Angles are in <strong>radians</strong> (a full turn is 2π ≈ 6.283). JavaScript's
+<code>Math.cos</code> and <code>Math.sin</code> expect radians, and so does every formula below.</p>
+<p>Because our y axis points <em>down</em>, a growing θ sweeps <strong>clockwise</strong> on screen.
+θ = 0 faces east, θ = π/2 faces south (down the map), θ = π faces west. Turning right means
+increasing the angle.</p>
+
+<h3>And back again</h3>
+<p>Given a vector <code>(x, y)</code>, its angle is <code>Math.atan2(y, x)</code>.
+The two-argument arctangent looks at both signs, so it gets the quadrant right, which a plain
+<code>atan(y / x)</code> can't. We'll use it to point the camera at whatever you drag in the
+demos.</p>
+
+<h2>Rotating a vector</h2>
+<p>To turn the player by an angle α, we could store the facing angle θ, add α, and recompute
+<code>(cos θ, sin θ)</code>. That works. But in the next step the camera gets a <em>second</em>
+vector (the screen plane), and later we'll want to rotate arbitrary points into camera
+space. The general tool is the rotation matrix.</p>
+<p>A linear transformation is completely determined by what it does to the two basis vectors
+<code>(1, 0)</code> and <code>(0, 1)</code>. Rotating by α sends</p>
+<ul>
+  <li><code>(1, 0)</code> → <code>(cos α, sin α)</code> (by definition of cos/sin), and</li>
+  <li><code>(0, 1)</code> → <code>(−sin α, cos α)</code> (the first one, turned a further 90°;
+  that's <code>perp</code> from step 1).</li>
+</ul>
+<p>Those images become the <em>columns</em> of the matrix:</p>
+<math display="block"><mrow><mi>R</mi><mo>(</mo><mi>α</mi><mo>)</mo></mrow><mo>=</mo><mtable class="mat"><mtr><mtd><mrow><mi>cos</mi><mo>&#x2061;</mo><mi>α</mi></mrow></mtd><mtd><mrow><mo>−</mo><mrow><mi>sin</mi><mo>&#x2061;</mo><mi>α</mi></mrow></mrow></mtd></mtr><mtr><mtd><mrow><mi>sin</mi><mo>&#x2061;</mo><mi>α</mi></mrow></mtd><mtd><mrow><mi>cos</mi><mo>&#x2061;</mo><mi>α</mi></mrow></mtd></mtr></mtable></math><math display="block"><mrow><mi>R</mi><mo>(</mo><mi>α</mi><mo>)</mo></mrow><mo>⋅</mo><mtable class="mat"><mtr><mtd><msub><mi>v</mi><mi>x</mi></msub></mtd></mtr><mtr><mtd><msub><mi>v</mi><mi>y</mi></msub></mtd></mtr></mtable><mo>=</mo><mtable class="mat"><mtr><mtd><mrow><mi>cos</mi><mo>&#x2061;</mo><mi>α</mi></mrow></mtd><mtd><mrow><mo>−</mo><mrow><mi>sin</mi><mo>&#x2061;</mo><mi>α</mi></mrow></mrow></mtd></mtr><mtr><mtd><mrow><mi>sin</mi><mo>&#x2061;</mo><mi>α</mi></mrow></mtd><mtd><mrow><mi>cos</mi><mo>&#x2061;</mo><mi>α</mi></mrow></mtd></mtr></mtable><mtable class="mat"><mtr><mtd><msub><mi>v</mi><mi>x</mi></msub></mtd></mtr><mtr><mtd><msub><mi>v</mi><mi>y</mi></msub></mtd></mtr></mtable><mo>=</mo><mtable class="mat"><mtr><mtd><mrow><msub><mi>v</mi><mi>x</mi></msub><mo>&#x2062;</mo><mrow><mi>cos</mi><mo>&#x2061;</mo><mi>α</mi></mrow><mo>−</mo><msub><mi>v</mi><mi>y</mi></msub><mo>&#x2062;</mo><mrow><mi>sin</mi><mo>&#x2061;</mo><mi>α</mi></mrow></mrow></mtd></mtr><mtr><mtd><mrow><msub><mi>v</mi><mi>x</mi></msub><mo>&#x2062;</mo><mrow><mi>sin</mi><mo>&#x2061;</mo><mi>α</mi></mrow><mo>+</mo><msub><mi>v</mi><mi>y</mi></msub><mo>&#x2062;</mo><mrow><mi>cos</mi><mo>&#x2061;</mo><mi>α</mi></mrow></mrow></mtd></mtr></mtable></math>
+<p>In code, this is the function the engine uses to turn the player:</p>
+<pre><code>function rotate(v, a) {
+  const c = Math.cos(a), s = Math.sin(a);
+  return { x: v.x * c - v.y * s,
+           y: v.x * s + v.y * c };
+}</code></pre>
+<p>Useful properties:</p>
+<ul>
+  <li><strong>Rotations compose by adding angles:</strong> R(α)·R(β) = R(α + β). Turning a
+  little bit every frame is just applying a small rotation every frame.</li>
+  <li><strong>Lengths and angles between vectors are preserved.</strong> If the direction vector
+  and the screen plane vector are perpendicular before the rotation, they stay perpendicular.</li>
+  <li><strong>The inverse is the transpose:</strong> R(α)<sup>−1</sup> = R(−α) = R(α)<sup>T</sup>.
+  Undoing a rotation is free. Keep this one in mind for step 3.</li>
+</ul>
+<aside class="note">One practical wrinkle: if you rotate a vector by small amounts thousands of
+times, floating-point rounding slowly changes its length. For our purposes (minutes of play) the drift is
+invisible, but a real engine either re-normalises occasionally or does what the originals did:
+store an integer angle and look up sin/cos in a table every frame.</aside>
+
+<figure class="demo">
+  <canvas id="a-canvas" width="480" height="360"></canvas>
+  <div class="controls">
+    <label>θ <input type="range" id="a-theta" min="0" max="359.9" step="0.1" value="30" data-unit="°"><output for="a-theta"></output></label>
+    <label>angle table
+      <select id="a-quant">
+        <option value="0">exact (Math.sin)</option>
+        <option value="8">8 angles</option>
+        <option value="16">16 angles</option>
+        <option value="64">64 angles</option>
+        <option value="360">360 (Wolf3D ANGLES)</option>
+        <option value="3600">3600 (Wolf3D FINEANGLES)</option>
+      </select>
+    </label>
+  </div>
+  <div class="readout" id="a-readout"></div>
+  <figcaption>Drag the <span style="color:#ef476f">direction</span> arrow around the unit circle
+  (or use the slider). Its x and y components are cos θ and sin θ. Drag the
+  <span style="color:#4cc9f0">v</span> handle: the <span style="color:#06d6a0">green</span> vector is
+  R(θ)·v, i.e. v rotated by the same angle.</figcaption>
+</figure>
+
+<div class="try">
+<ul>
+  <li>Set θ = 90°. The direction points <em>down</em>, and the matrix becomes
+  <code>[0 −1; 1 0]</code>, which is exactly <code>perp</code>.</li>
+  <li>Pick “8 angles” and drag around: the direction snaps. That's what a too-small lookup
+  table would feel like when turning.</li>
+  <li>Watch |R·v|: it always equals |v|.</li>
+</ul>
+</div>
+
+<aside class="retro">
+<h3>Sine tables and binary angles</h3>
+<p>Computing a sine in software on a 386 takes hundreds or thousands of cycles. Looking one up
+in an array takes a handful. So both engines precompute tables at startup and never call a sine
+function during play.</p>
+<ul>
+  <li><strong>Wolfenstein 3D</strong> stores the player's angle as an integer in degrees
+  (<code>ANGLES = 360</code>) and has a <code>sintable</code> of fixed-point values. The cosine
+  table is the <em>same</em> array, offset by a quarter turn (cos θ = sin(θ + 90°)). The ray
+  caster uses a finer table of <code>FINEANGLES = 3600</code> steps (a tenth of a degree) for
+  tangents.</li>
+  <li><strong>Doom</strong> uses <em>binary angle measurement</em>: an angle is an unsigned
+  32-bit integer where 2<sup>32</sup> is a full circle. Adding two angles wraps around
+  automatically on overflow, so there's no “if angle ≥ 360 then subtract 360” anywhere. The top
+  bits index an 8192-entry <code>finesine</code> table.</li>
+</ul>
+<p>Try the “angle table” dropdown above: with 360 entries the snapping is already invisible at
+this size, and 3600 is plenty for casting 320 rays.</p>
+</aside>
+
+<h2>Next</h2>
+<p>A direction alone isn't a camera. Next we add the <em>screen plane</em> vector, work out which
+ray goes through each column of pixels, and build the matrix that takes world points into
+camera space.</p>
+</article>
+
+<nav class="steps-nav bottom">
+  <a href="../01-vectors/index.html">← Step 1: Vectors</a>
+  <a href="../03-camera/index.html">Step 3: The camera →</a>
+</nav>
+
+<script src="../../common/diagram.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>

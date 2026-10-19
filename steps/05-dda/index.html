@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DDA Grid Traversal</title>
+<link rel="stylesheet" href="../../common/style.css">
+</head>
+<body>
+<nav class="steps-nav">
+  <a href="../04-ray-marching/index.html">← Step 4: Ray marching</a>
+  <a href="../../index.html">↑ Contents</a>
+  <a href="../06-projection/index.html">Step 6: Projection →</a>
+</nav>
+
+<article>
+<p class="kicker">Part 1 · Step 5</p>
+<h1>DDA: walking a ray through the grid, one cell at a time</h1>
+<p class="lede">This is the core of every Wolfenstein-style engine. Instead of tiny steps, we jump
+straight from one grid line crossing to the next, so we visit exactly the cells the ray passes
+through and find the exact hit point.</p>
+
+<h2>Crossings come at regular intervals</h2>
+<p>Take the ray <code>P(t) = pos + t·r</code>, where <code>r = (r<sub>x</sub>, r<sub>y</sub>)</code>
+is the ray direction (it doesn't need to be a unit vector). Look only at the x coordinate: it
+changes by <code>r<sub>x</sub></code> per unit of <code>t</code>. The vertical grid lines
+<code>x = 0, 1, 2, …</code> are one unit apart, so the ray crosses one every</p>
+<p class="math">Δt<sub>x</sub> = 1 / |r<sub>x</sub>| &nbsp;&nbsp;&nbsp; and likewise &nbsp;&nbsp;&nbsp;
+Δt<sub>y</sub> = 1 / |r<sub>y</sub>|</p>
+<p>The crossings of vertical lines are evenly spaced along the ray, and so are the crossings of
+horizontal lines. Only the first one of each is special, because the eye sits somewhere inside a
+cell. If the ray goes right (<code>r<sub>x</sub> &gt; 0</code>), the first vertical line is at
+<code>x = mapX + 1</code>, which takes <code>(mapX + 1 − pos<sub>x</sub>) · Δt<sub>x</sub></code>
+to reach. If it goes left, the line is at <code>x = mapX</code>, which takes
+<code>(pos<sub>x</sub> − mapX) · Δt<sub>x</sub></code>.</p>
+
+<h2>The algorithm</h2>
+<p>Keep two numbers: <code>sideDistX</code>, the <code>t</code> at which we'll cross the
+<em>next</em> vertical line, and <code>sideDistY</code>, the same for the next horizontal line. Then
+repeat:</p>
+<ol>
+  <li>Whichever is smaller comes first. Say it's <code>sideDistX</code>: we cross a vertical line
+  and move one cell left or right (<code>mapX += stepX</code>).</li>
+  <li>The next vertical line is <code>Δt<sub>x</sub></code> further: <code>sideDistX += deltaDistX</code>.</li>
+  <li>Check the new cell. If it's a wall, stop. The current <code>t</code> is the exact distance to
+  the wall face, and we know <em>which</em> kind of face we hit: a vertical line means an
+  east/west-facing wall (<code>side = 0</code>), a horizontal line means north/south (<code>side = 1</code>).</li>
+</ol>
+<p>Here it is, straight from this step's <code>raycaster.js</code> (minus the trace recording):</p>
+<pre><code>function castRay(map, posX, posY, rayDirX, rayDirY) {
+  let mapX = Math.floor(posX);
+  let mapY = Math.floor(posY);
+
+  const deltaDistX = rayDirX === 0 ? 1e30 : Math.abs(1 / rayDirX);
+  const deltaDistY = rayDirY === 0 ? 1e30 : Math.abs(1 / rayDirY);
+
+  let stepX, stepY, sideDistX, sideDistY;
+  if (rayDirX &lt; 0) { stepX = -1; sideDistX = (posX - mapX) * deltaDistX; }
+  else             { stepX =  1; sideDistX = (mapX + 1 - posX) * deltaDistX; }
+  if (rayDirY &lt; 0) { stepY = -1; sideDistY = (posY - mapY) * deltaDistY; }
+  else             { stepY =  1; sideDistY = (mapY + 1 - posY) * deltaDistY; }
+
+  let t = 0, side = 0, cell = 0;
+  for (let i = 0; i &lt; MAX_STEPS; i++) {
+    if (sideDistX &lt; sideDistY) {
+      t = sideDistX; sideDistX += deltaDistX; mapX += stepX; side = 0;
+    } else {
+      t = sideDistY; sideDistY += deltaDistY; mapY += stepY; side = 1;
+    }
+    cell = mapCell(map, mapX, mapY);   // outside the map counts as wall
+    if (cell !== 0) break;
+  }
+  return { t, mapX, mapY, side, cell };
+}</code></pre>
+<p>Notice what's <em>not</em> in the loop: no multiplication, no division, no square root. Just a
+comparison, an addition and an increment. Divisions happen once per ray, outside it. A wall 10
+cells away now costs around 15 iterations instead of 1,000, and the answer is exact.</p>
+
+<figure class="demo">
+  <canvas id="d-canvas" width="480" height="320"></canvas>
+  <div class="controls">
+    <label>step <input type="range" id="d-iter" min="0" max="20" step="1" value="20"><output for="d-iter"></output></label>
+    <button id="d-play">▶ play</button>
+  </div>
+  <div class="readout" id="d-readout"></div>
+  <figcaption>Drag the <span style="color:#ffd166">eye</span> and the
+  <span style="color:#4cc9f0">aim</span>. Use the slider (or ▶) to step through the loop.
+  <span style="color:#f8961e">Orange</span> dots are crossings of vertical lines (side 0),
+  <span style="color:#b388ff">purple</span> dots crossings of horizontal lines (side 1). The two hollow
+  rings are the next candidates, <code>sideDistX</code> and <code>sideDistY</code>; the nearer one wins.</figcaption>
+</figure>
+
+<div class="try">
+<ul>
+  <li>Aim almost exactly horizontally. <code>deltaDistY</code> becomes huge: the ray hardly
+  ever crosses a horizontal line, so it's almost all orange steps.</li>
+  <li>Aim at 45°: <code>deltaDistX = deltaDistY</code>, and the steps alternate.</li>
+  <li>Find the corner case from step 4 (a ray grazing a wall corner). DDA never misses it.</li>
+</ul>
+</div>
+
+<h2>What “t” means here (and a preview)</h2>
+<p>We return <code>t</code>, not a Euclidean distance. The hit point is <code>pos + t·rayDir</code>,
+so the real distance is <code>t · |rayDir|</code>. In the demo <code>rayDir</code> has length 1, so
+the two are the same. In the real engine they won't be: <code>rayDir = d + c·p</code> from step 3 is
+longer than 1 towards the screen edges. In step 7 that turns out to be exactly what we want.</p>
+
+<aside class="retro">
+<h3>Why it's called DDA, and what Wolf3D actually did</h3>
+<p>“Digital Differential Analyzer” is an old name from line-drawing hardware: step along one axis,
+accumulate the other in increments. The grid version, “visit every cell a ray touches, in order”,
+was written up for 3D voxel grids by Amanatides and Woo in 1987 (<em>A Fast Voxel Traversal
+Algorithm for Ray Tracing</em>), and it's the same thing we just wrote in 2D.</p>
+<p>Wolfenstein's ray caster (an assembly routine called <code>AsmRefresh</code>) is organised a
+little differently but rests on the same idea. It tracks the next x-intercept and y-intercept in
+fixed point, steps them by the tangent of the ray angle (from a table, of course), and always
+advances whichever is nearer. Everything is integer adds and compares.</p>
+<p>It also cheats in a useful way: because walls fill whole cells and every ray stops at the
+first one, it never needs to consider anything behind a wall. That's why Wolfenstein has no
+overdraw for walls: each screen column is drawn exactly once.</p>
+</aside>
+
+<h2>Next</h2>
+<p>We've got Part 1's tools: vectors, rotation, a camera, and exact ray hits. Part 2 turns the hits
+into a picture, starting with the projection that turns a distance into a wall height.</p>
+</article>
+
+<nav class="steps-nav bottom">
+  <a href="../04-ray-marching/index.html">← Step 4: Ray marching</a>
+  <a href="../06-projection/index.html">Step 6: Projection →</a>
+</nav>
+
+<script src="../../common/diagram.js"></script>
+<script src="raycaster.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>

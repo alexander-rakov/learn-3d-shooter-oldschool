@@ -1,0 +1,265 @@
+/* Shared look for all article pages. */
+
+:root {
+  --bg: #fbfaf7;
+  --fg: #1d1f24;
+  --muted: #5d6470;
+  --rule: #e2dfd8;
+  --link: #1f5fbf;
+  --code-bg: #f1efe9;
+  --retro-bg: #fff6df;
+  --retro-edge: #d99a1e;
+  --demo-bg: #f3f1ec;
+  --accent: #c2410c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171b;
+    --fg: #e4e6ea;
+    --muted: #9aa1ad;
+    --rule: #2c3038;
+    --link: #7fb0ff;
+    --code-bg: #1e2127;
+    --retro-bg: #2a2416;
+    --retro-edge: #d99a1e;
+    --demo-bg: #1c1f24;
+    --accent: #fb923c;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #15171b;
+  --fg: #e4e6ea;
+  --muted: #9aa1ad;
+  --rule: #2c3038;
+  --link: #7fb0ff;
+  --code-bg: #1e2127;
+  --retro-bg: #2a2416;
+  --retro-edge: #d99a1e;
+  --demo-bg: #1c1f24;
+  --accent: #fb923c;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0 16px 4rem;
+  background: var(--bg);
+  color: var(--fg);
+  font: 17px/1.65 Charter, "Bitstream Charter", "Sitka Text", Cambria, Georgia, serif;
+}
+
+a { color: var(--link); }
+
+article, .page { max-width: 46rem; margin: 0 auto; }
+
+h1, h2, h3 { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; line-height: 1.25; }
+h1 { font-size: 2.1rem; margin: 0.4rem 0 1rem; }
+h2 { font-size: 1.45rem; margin-top: 2.6rem; border-bottom: 1px solid var(--rule); padding-bottom: 0.3rem; }
+h3 { font-size: 1.15rem; margin-top: 1.8rem; }
+
+.kicker {
+  font: 600 0.8rem/1 system-ui, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 2.5rem 0 0;
+}
+
+.lede { font-size: 1.12rem; color: var(--muted); }
+
+nav.steps-nav {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 0.9rem 0;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  font: 0.9rem system-ui, sans-serif;
+  border-bottom: 1px solid var(--rule);
+}
+nav.steps-nav.bottom { border-bottom: 0; border-top: 1px solid var(--rule); margin-top: 3rem; }
+
+code, pre, kbd, .readout {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.86em;
+}
+code { background: var(--code-bg); padding: 0.1em 0.3em; border-radius: 3px; }
+pre {
+  background: var(--code-bg);
+  padding: 0.9rem 1rem;
+  border-radius: 6px;
+  overflow-x: auto;
+  line-height: 1.45;
+}
+pre code { background: none; padding: 0; font-size: 0.82rem; }
+kbd {
+  border: 1px solid var(--rule);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 0.35em;
+  background: var(--code-bg);
+}
+
+.math {
+  font-style: italic;
+  text-align: center;
+  margin: 1.1rem 0;
+  font-size: 1.08rem;
+  overflow-x: auto;
+}
+.math .n { font-style: normal; }
+
+/* "In 1992" history boxes */
+aside.retro {
+  background: var(--retro-bg);
+  border-left: 4px solid var(--retro-edge);
+  padding: 0.4rem 1.1rem 0.6rem;
+  margin: 2rem 0;
+  border-radius: 0 6px 6px 0;
+}
+aside.retro::before {
+  content: "How it was done in 1992";
+  display: block;
+  font: 700 0.75rem/1 system-ui, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--retro-edge);
+  margin: 0.7rem 0 0.2rem;
+}
+aside.retro h3 { margin-top: 0.6rem; }
+
+aside.note {
+  border-left: 4px solid var(--rule);
+  padding: 0.1rem 1rem;
+  color: var(--muted);
+  margin: 1.5rem 0;
+}
+
+/* Interactive demos */
+figure.demo {
+  margin: 1.8rem 0;
+  padding: 0.9rem;
+  background: var(--demo-bg);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+figure.demo figcaption {
+  font: 0.86rem/1.45 system-ui, sans-serif;
+  color: var(--muted);
+  margin-top: 0.7rem;
+}
+figure.demo canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0 auto;
+  border-radius: 4px;
+  touch-action: none;
+  background: #14161b;
+}
+canvas.pixels {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  max-width: 640px;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.2rem;
+  align-items: center;
+  margin-top: 0.7rem;
+  font: 0.86rem system-ui, sans-serif;
+}
+.controls label { display: inline-flex; align-items: center; gap: 0.4rem; }
+.controls input[type="range"] { width: 8rem; }
+.controls output { font-family: ui-monospace, monospace; min-width: 3.5em; }
+.controls button {
+  font: inherit;
+  padding: 0.2rem 0.7rem;
+  border-radius: 4px;
+  border: 1px solid var(--rule);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.readout {
+  margin-top: 0.7rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  white-space: pre;
+  overflow-x: auto;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+/* Game demos: a focusable wrapper so arrow keys don't scroll the page */
+.game {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  justify-content: center;
+  align-items: flex-start;
+  outline: none;
+  border-radius: 6px;
+}
+.game:focus { box-shadow: 0 0 0 2px var(--accent); }
+.game:not(:focus)::after {
+  content: "Click here, then use the keyboard";
+  position: absolute;
+  left: 50%;
+  top: 0.6rem;
+  transform: translateX(-50%);
+  padding: 0.25rem 0.7rem;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font: 0.8rem system-ui, sans-serif;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.game canvas.view { flex: 2 1 320px; }
+.game canvas.minimap { flex: 1 1 160px; max-width: 240px; }
+
+table.vars { border-collapse: collapse; font-size: 0.9rem; margin: 1rem 0; }
+table.vars td, table.vars th { border-bottom: 1px solid var(--rule); padding: 0.25rem 0.8rem 0.25rem 0; text-align: left; vertical-align: top; }
+
+ol.toc { padding-left: 1.4rem; }
+ol.toc li { margin: 0.35rem 0; }
+.planned { color: var(--muted); }
+.planned::after { content: " — planned"; font-style: italic; font-size: 0.9em; }
+
+.try { border: 1px dashed var(--rule); border-radius: 6px; padding: 0.2rem 1rem; }
+.try::before { content: "Try this"; display: block; font: 700 0.75rem system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-top: 0.6rem; }
+
+/* MathML formulas (rendered natively by the browser) */
+math[display="block"] {
+  margin: 1.2rem 0;
+  font-size: 1.15em;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.2rem 0;
+}
+/* Square brackets around matrices, drawn with CSS so no math font is needed */
+math mtable.mat {
+  --b: 1.5px;
+  --t: 0.32em;
+  padding: 0.2em 0.35em;
+  margin: 0 0.15em;
+  border-left: var(--b) solid currentColor;
+  border-right: var(--b) solid currentColor;
+  background:
+    linear-gradient(currentColor, currentColor) left top / var(--t) var(--b) no-repeat,
+    linear-gradient(currentColor, currentColor) left bottom / var(--t) var(--b) no-repeat,
+    linear-gradient(currentColor, currentColor) right top / var(--t) var(--b) no-repeat,
+    linear-gradient(currentColor, currentColor) right bottom / var(--t) var(--b) no-repeat;
+}
+math mtable.mat mtd { padding: 0.1em 0.4em; }

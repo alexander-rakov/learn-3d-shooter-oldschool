@@ -1,0 +1,223 @@
+'use strict';
+/*
+ * The engine, step 9: textured walls.
+ * New since step 8: renderFrame samples WALL_TEXTURES (see textures.js)
+ * instead of filling flat colours, and returns per-column details.
+ */
+
+function parseMap(rows) {
+  const h = rows.length, w = rows[0].length;
+  const cells = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const ch = rows[y][x];
+      cells[y * w + x] = ch === '.' ? 0 : ch === '#' ? 1 : parseInt(ch, 10);
+    }
+  }
+  return { w, h, cells };
+}
+
+function mapCell(map, x, y) {
+  if (x < 0 || y < 0 || x >= map.w || y >= map.h) return 1;
+  return map.cells[y * map.w + x];
+}
+
+const MAX_STEPS = 128;
+
+function castRay(map, posX, posY, rayDirX, rayDirY) {
+  let mapX = Math.floor(posX);
+  let mapY = Math.floor(posY);
+  const deltaDistX = rayDirX === 0 ? 1e30 : Math.abs(1 / rayDirX);
+  const deltaDistY = rayDirY === 0 ? 1e30 : Math.abs(1 / rayDirY);
+
+  let stepX, stepY, sideDistX, sideDistY;
+  if (rayDirX < 0) { stepX = -1; sideDistX = (posX - mapX) * deltaDistX; }
+  else             { stepX =  1; sideDistX = (mapX + 1 - posX) * deltaDistX; }
+  if (rayDirY < 0) { stepY = -1; sideDistY = (posY - mapY) * deltaDistY; }
+  else             { stepY =  1; sideDistY = (mapY + 1 - posY) * deltaDistY; }
+
+  let t = 0, side = 0, cell = 0;
+  for (let i = 0; i < MAX_STEPS; i++) {
+    if (sideDistX < sideDistY) {
+      t = sideDistX; sideDistX += deltaDistX; mapX += stepX; side = 0;
+    } else {
+      t = sideDistY; sideDistY += deltaDistY; mapY += stepY; side = 1;
+    }
+    cell = mapCell(map, mapX, mapY);
+    if (cell !== 0) break;
+  }
+  return { t, mapX, mapY, side, cell };
+}
+
+// ------------------------------------------------------------- player / camera
+
+/** The camera from step 3: position, unit direction d, and plane p = perp(d)·tan(FOV/2). */
+function createPlayer(x, y, angle, fovDegrees = 66) {
+  const k = Math.tan(fovDegrees * Math.PI / 360);
+  const dirX = Math.cos(angle), dirY = Math.sin(angle);
+  return { x, y, dirX, dirY, planeX: -dirY * k, planeY: dirX * k };
+}
+
+/** Changes the field of view: rescales p, keeping its direction. */
+function setFov(p, fovDegrees) {
+  const k = Math.tan(fovDegrees * Math.PI / 360) / Math.hypot(p.planeX, p.planeY);
+  p.planeX *= k;
+  p.planeY *= k;
+}
+
+/** Rotation matrix from step 2, applied to both camera vectors. */
+function rotatePlayer(p, a) {
+  const c = Math.cos(a), s = Math.sin(a);
+  const dx = p.dirX, px = p.planeX;
+  p.dirX = dx * c - p.dirY * s;
+  p.dirY = dx * s + p.dirY * c;
+  p.planeX = px * c - p.planeY * s;
+  p.planeY = px * s + p.planeY * c;
+}
+
+const MOVE_SPEED = 3.0;     // cells per second
+const RUN_FACTOR = 1.8;     // while Shift is held
+const TURN_SPEED = 2.2;     // radians per second
+const PLAYER_RADIUS = 0.3;  // half the side of the player's collision box, in cells
+
+/** Does a square of half-size r centred on (x, y) overlap any wall cell? */
+function isBlocked(map, x, y, r) {
+  const x0 = Math.floor(x - r), x1 = Math.floor(x + r);
+  const y0 = Math.floor(y - r), y1 = Math.floor(y + r);
+  for (let cy = y0; cy <= y1; cy++) {
+    for (let cx = x0; cx <= x1; cx++) {
+      if (mapCell(map, cx, cy) !== 0) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Moves p by (dx, dy) unless that would put it inside a wall.
+ * With slide = true, x and y are tried separately, so when you walk into a
+ * wall at an angle the blocked component is dropped and you glide along it.
+ */
+function tryMove(map, p, dx, dy, r, slide = true) {
+  if (!slide) {
+    if (!isBlocked(map, p.x + dx, p.y + dy, r)) { p.x += dx; p.y += dy; }
+    return;
+  }
+  if (!isBlocked(map, p.x + dx, p.y, r)) p.x += dx;
+  if (!isBlocked(map, p.x, p.y + dy, r)) p.y += dy;
+}
+
+/**
+ * Keyboard controls, all scaled by dt (seconds since the last frame) so speed
+ * doesn't depend on the frame rate:
+ *   ← →: turn  ·  ↑ ↓ / W S: forward/back  ·  A D: strafe  ·  Shift: run
+ */
+function movePlayer(map, p, keys, dt, opts = {}) {
+  const radius = opts.radius ?? PLAYER_RADIUS;
+  if (keys.has('ArrowLeft'))  rotatePlayer(p, -TURN_SPEED * dt);
+  if (keys.has('ArrowRight')) rotatePlayer(p,  TURN_SPEED * dt);
+
+  let forward = 0, strafe = 0;
+  if (keys.has('ArrowUp') || keys.has('KeyW')) forward += 1;
+  if (keys.has('ArrowDown') || keys.has('KeyS')) forward -= 1;
+  if (keys.has('KeyD')) strafe += 1;
+  if (keys.has('KeyA')) strafe -= 1;
+  if (!forward && !strafe) return;
+
+  // Strafing moves along the plane vector (the camera's "right"), normalised.
+  const planeLen = Math.hypot(p.planeX, p.planeY);
+  let mx = p.dirX * forward + (p.planeX / planeLen) * strafe;
+  let my = p.dirY * forward + (p.planeY / planeLen) * strafe;
+  const len = Math.hypot(mx, my);           // diagonal input shouldn't be faster
+  const run = keys.has('ShiftLeft') || keys.has('ShiftRight') ? RUN_FACTOR : 1;
+  const step = MOVE_SPEED * run * dt / len;
+  tryMove(map, p, mx * step, my * step, radius, opts.slide ?? true);
+}
+
+// ------------------------------------------------------------- pixels
+
+/** Packs a colour into one 32-bit pixel (ImageData is RGBA bytes = ABGR as a little-endian uint32). */
+function rgb(r, g, b) {
+  return (0xFF000000 | (b << 16) | (g << 8) | r) >>> 0;
+}
+
+/** Halves every channel: the "dark side" of a wall. */
+function shade(c) {
+  return (((c >>> 1) & 0x7F7F7F) | 0xFF000000) >>> 0;
+}
+
+/** A software framebuffer: we write pixels into `pixels`, then blit it to the canvas. */
+function createScreen(canvas) {
+  const ctx = canvas.getContext('2d');
+  const image = ctx.createImageData(canvas.width, canvas.height);
+  return {
+    w: canvas.width, h: canvas.height, ctx, image,
+    pixels: new Uint32Array(image.data.buffer),
+    present() { this.ctx.putImageData(this.image, 0, 0); },
+  };
+}
+
+const CEILING_COLOR = rgb(56, 56, 56);
+const FLOOR_COLOR = rgb(112, 112, 112);
+
+/**
+ * Draws one frame. Returns per-column details (for the minimap and the demo).
+ *
+ * opts.shadeSides (default true): darken faces with side = 1
+ * opts.debugUV: colour walls by texture coordinate instead (u → red, v → green)
+ */
+function renderFrame(screen, map, p, opts = {}) {
+  const { w, h, pixels } = screen;
+  const planeLen = Math.hypot(p.planeX, p.planeY);
+  const projScale = (w / 2) / planeLen;
+  const shadeSides = opts.shadeSides ?? true;
+  const columns = new Array(w);
+
+  for (let x = 0; x < w; x++) {
+    const c = 2 * x / w - 1;
+    const rayDirX = p.dirX + p.planeX * c;
+    const rayDirY = p.dirY + p.planeY * c;
+    const hit = castRay(map, p.x, p.y, rayDirX, rayDirY);
+    const dist = hit.t;
+
+    const lineHeight = projScale / dist;
+    const wallTop = h / 2 - lineHeight / 2;              // unclipped, may be < 0
+    const top = Math.max(0, Math.ceil(wallTop - 0.5));
+    const bottom = Math.min(h, Math.ceil(wallTop + lineHeight - 0.5));
+
+    // ---- u: where along the wall face did the ray hit? (0 … 1 across the cell)
+    // On an x-side (vertical grid line) the face runs along y, and vice versa.
+    let wallX = hit.side === 0 ? p.y + hit.t * rayDirY : p.x + hit.t * rayDirX;
+    wallX -= Math.floor(wallX);
+    let texX = Math.floor(wallX * TEX);
+    // Seen from the west or north side, increasing wallX runs right-to-left on
+    // screen; flip so textures are never mirrored.
+    if ((hit.side === 0 && rayDirX < 0) || (hit.side === 1 && rayDirY > 0)) texX = TEX - 1 - texX;
+
+    // ---- v: screen row → texture row is a linear map, v = (y - wallTop) * TEX / lineHeight.
+    // Instead of multiplying per pixel, start at the first visible row and add `step`.
+    const tex = WALL_TEXTURES[hit.cell] || WALL_TEXTURES[1];
+    const texCol = texX * TEX;                            // column-major: one column is contiguous
+    const step = TEX / lineHeight;
+    let texPos = (top + 0.5 - wallTop) * step;            // sample at pixel centres
+    const dark = shadeSides && hit.side === 1;
+
+    for (let y = 0; y < top; y++) pixels[y * w + x] = CEILING_COLOR;
+    for (let y = top; y < bottom; y++) {
+      const texY = (texPos | 0) & (TEX - 1);
+      texPos += step;
+      let color;
+      if (opts.debugUV) color = rgb(texX * 4, texY * 4, 64);
+      else color = tex[texCol + texY];
+      pixels[y * w + x] = dark ? shade(color) : color;
+    }
+    for (let y = bottom; y < h; y++) pixels[y * w + x] = FLOOR_COLOR;
+
+    columns[x] = {
+      hitX: p.x + rayDirX * hit.t, hitY: p.y + rayDirY * hit.t,
+      dist, lineHeight, top, bottom, side: hit.side, cell: hit.cell,
+      mapX: hit.mapX, mapY: hit.mapY, wallX, texX, step,
+    };
+  }
+  screen.present();
+  return columns;
+}
