@@ -92,9 +92,17 @@ const perp  = (a)    => ({ x: -a.y, y: a.x });
     // BigInt to show the full 64-bit intermediate, like FixedMul does in assembly.
     const wide = BigInt(fa) * BigInt(fb);
     const prod = Number(wide >> 16n);
+    // high 16 bits = integer part (rounded down), low 16 bits = count of 1/65536 steps
+    const split = (f) => {
+      const frac = f & 0xFFFF;
+      return `int = ${f >> 16}, frac = 0x${frac.toString(16).toUpperCase().padStart(4, '0')} ` +
+             `= ${frac}/65536 = ${(frac / 65536).toFixed(6)}`;
+    };
     out.textContent =
-      `a  = ${a}  →  ${fa}  (${hex(fa)})   stored value = ${(fa / 65536).toFixed(6)}\n` +
-      `b  = ${b}  →  ${fb}  (${hex(fb)})   stored value = ${(fb / 65536).toFixed(6)}\n` +
+      `a  = ${a}  →  ${a} × 65536 = ${fa}  (${hex(fa)})   stored value = ${(fa / 65536).toFixed(6)}\n` +
+      `      ${split(fa)}\n` +
+      `b  = ${b}  →  ${b} × 65536 = ${fb}  (${hex(fb)})   stored value = ${(fb / 65536).toFixed(6)}\n` +
+      `      ${split(fb)}\n` +
       `a_fixed × b_fixed = ${wide}  (needs ${wide === 0n ? 0 : (wide < 0n ? -wide : wide).toString(2).length + 1} bits!)\n` +
       `(a × b) >> 16     = ${prod}  →  ${(prod / 65536).toFixed(6)}   float result: ${(a * b).toFixed(6)}`;
   }

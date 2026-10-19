@@ -120,6 +120,24 @@ the fraction. This is called “16.16” format.</p>
 <pre><code>value_fixed = round(value × 65536)        // 1.0 is 0x00010000
 a + b  →  a_fixed + b_fixed               // addition is just integer addition
 a × b  →  (a_fixed × b_fixed) &gt;&gt; 16       // the product has 32 fraction bits; shift 16 away</code></pre>
+<h3>The low 16 bits count 65536ths, not hundredths</h3>
+<p>It's tempting to read 3.75 as “3, then 75”. But the fraction isn't stored as decimal digits. The
+low 16 bits hold a whole number of <strong>1/65536 steps</strong>, so a fraction <code>f</code> is stored as
+<code>f × 65536</code>:</p>
+<pre><code>3.75 × 65536 = 245760 = 0x0003C000
+                         ^^^^ ^^^^
+                         |    low 16 bits:  0xC000 = 49152,  49152 / 65536 = 0.75
+                         high 16 bits: 0x0003 = 3</code></pre>
+<p>In binary it's even clearer, because the bits after the “binary point” are worth ½, ¼, ⅛, and so on:</p>
+<pre><code>0.75 = ½ + ¼   →  binary 0.11  →  the 16 fraction bits are 1100 0000 0000 0000 = 0xC000
+0.5            →  binary 0.1   →  1000 0000 0000 0000 = 0x8000
+0.1            →  0.000110011001100…  (repeats forever, so it gets rounded: 0x199A)</code></pre>
+<p>That's also why some decimals can't be stored exactly: 0.1 has no finite binary expansion, just as
+⅓ has no finite decimal one. (Floats have the same problem, only with more bits.)</p>
+<p>Negative numbers use ordinary two's complement on the whole 32-bit value, so the split reads
+slightly oddly: −1.2 becomes <code>0xFFFECCCD</code>. The high half is −2 and the low half is
++0.8, and −2 + 0.8 = −1.2. The integer part is always rounded <em>down</em> (toward −∞), and the
+fraction is always a positive amount added on top. The calculator below shows the split.</p>
 <p>In Wolfenstein's source, one map cell is <code>TILEGLOBAL = 1&lt;&lt;16</code>, so the
 integer part of a coordinate <em>is</em> the cell index and the fraction is the position inside the
 cell. Doom calls the same idea <code>FRACUNIT</code> and multiplies with a small assembly
