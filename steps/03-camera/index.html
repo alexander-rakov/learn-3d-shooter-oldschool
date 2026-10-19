@@ -76,14 +76,11 @@ enemy, a lamp, the corner of a wall), where does it appear on screen?</p>
 </ul>
 <p>Written as a matrix, the two basis vectors become the columns of the
 <strong>camera matrix</strong> M:</p>
-<p class="math">q − pos = M · (u, v)<sup>T</sup>, &nbsp;&nbsp;
-M = [ p<sub>x</sub> &nbsp; d<sub>x</sub> ; &nbsp; p<sub>y</sub> &nbsp; d<sub>y</sub> ]</p>
+<math display="block"><mrow><mi>q</mi><mo>−</mo><mi>pos</mi></mrow><mo>=</mo><mi>M</mi><mo>⋅</mo><mtable class="mat"><mtr><mtd><mi>u</mi></mtd></mtr><mtr><mtd><mi>v</mi></mtd></mtr></mtable><mo>,</mo><mspace width="1.5em"/><mi>M</mi><mo>=</mo><mtable class="mat"><mtr><mtd><msub><mi>p</mi><mi>x</mi></msub></mtd><mtd><msub><mi>d</mi><mi>x</mi></msub></mtd></mtr><mtr><mtd><msub><mi>p</mi><mi>y</mi></msub></mtd><mtd><msub><mi>d</mi><mi>y</mi></msub></mtd></mtr></mtable></math>
 <p><strong>M</strong> takes camera coordinates to world coordinates. To go the other way we invert
 it. For a 2 × 2 matrix the inverse is: swap the diagonal, negate the off-diagonal, divide by the
 determinant.</p>
-<p class="math">(u, v)<sup>T</sup> = M<sup>−1</sup> · (q − pos), &nbsp;&nbsp;
-M<sup>−1</sup> = <span class="n">1/det</span> · [ d<sub>y</sub> &nbsp; −d<sub>x</sub> ; &nbsp;
-−p<sub>y</sub> &nbsp; p<sub>x</sub> ], &nbsp;&nbsp; det = p<sub>x</sub>d<sub>y</sub> − d<sub>x</sub>p<sub>y</sub></p>
+<math display="block"><mtable class="mat"><mtr><mtd><mi>u</mi></mtd></mtr><mtr><mtd><mi>v</mi></mtd></mtr></mtable><mo>=</mo><msup><mi>M</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><mo>⋅</mo><mo>(</mo><mrow><mi>q</mi><mo>−</mo><mi>pos</mi></mrow><mo>)</mo><mo>,</mo><mspace width="1.5em"/><msup><mi>M</mi><mrow><mo>−</mo><mn>1</mn></mrow></msup><mo>=</mo><mfrac><mn>1</mn><mi>det</mi></mfrac><mtable class="mat"><mtr><mtd><msub><mi>d</mi><mi>y</mi></msub></mtd><mtd><mrow><mo>−</mo><msub><mi>d</mi><mi>x</mi></msub></mrow></mtd></mtr><mtr><mtd><mrow><mo>−</mo><msub><mi>p</mi><mi>y</mi></msub></mrow></mtd><mtd><msub><mi>p</mi><mi>x</mi></msub></mtd></mtr></mtable><mo>,</mo><mspace width="1.5em"/><mi>det</mi><mo>=</mo><mrow><msub><mi>p</mi><mi>x</mi></msub><mo>&#x2062;</mo><msub><mi>d</mi><mi>y</mi></msub><mo>−</mo><msub><mi>d</mi><mi>x</mi></msub><mo>&#x2062;</mo><msub><mi>p</mi><mi>y</mi></msub></mrow></math>
 <pre><code>const rx = qx - posX, ry = qy - posY;            // q relative to the eye
 const invDet = 1 / (planeX * dirY - dirX * planeY);
 const u = invDet * ( dirY   * rx - dirX   * ry); // sideways, in units of p

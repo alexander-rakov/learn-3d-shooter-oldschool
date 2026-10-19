@@ -39,8 +39,7 @@ floor point. One computation serves both.</p>
 <p>Inside a row, pixel <code>x</code> looks along the same ray as the wall column <code>x</code>:
 <code>d + c·p</code>, with <code>c = 2x/W − 1</code>. Going a depth of <code>rowDist</code> along it
 (remember from step 7: <code>t</code> along a plane ray <em>is</em> depth), the floor point is</p>
-<p class="math">world = pos + rowDist · (d + c·p) = pos + rowDist · M · (c, 1)<sup>T</sup>, &nbsp;&nbsp;
-M = [ p<sub>x</sub> &nbsp; d<sub>x</sub> ; &nbsp; p<sub>y</sub> &nbsp; d<sub>y</sub> ]</p>
+<math display="block"><mi>world</mi><mo>=</mo><mi>pos</mi><mo>+</mo><mi>rowDist</mi><mo>⋅</mo><mo>(</mo><mi>d</mi><mo>+</mo><mi>c</mi><mo>⋅</mo><mi>p</mi><mo>)</mo><mo>=</mo><mi>pos</mi><mo>+</mo><mi>rowDist</mi><mo>⋅</mo><mtable class="mat"><mtr><mtd><msub><mi>p</mi><mi>x</mi></msub></mtd><mtd><msub><mi>d</mi><mi>x</mi></msub></mtd></mtr><mtr><mtd><msub><mi>p</mi><mi>y</mi></msub></mtd><mtd><msub><mi>d</mi><mi>y</mi></msub></mtd></mtr></mtable><mtable class="mat"><mtr><mtd><mi>c</mi></mtd></mtr><mtr><mtd><mn>1</mn></mtd></mtr></mtable></math>
 <p>That's the camera matrix from step 3, used <em>forwards</em>. In step 3, <code>M⁻¹</code> took a world
 point to camera coordinates <code>(u, v)</code> so we could find its pixel. Here <code>M</code> takes
 camera coordinates, <code>(c·rowDist, rowDist)</code>, back to the world so we can find what a pixel

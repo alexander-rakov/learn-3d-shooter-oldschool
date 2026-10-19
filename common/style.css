@@ -239,3 +239,27 @@ ol.toc li { margin: 0.35rem 0; }
 
 .try { border: 1px dashed var(--rule); border-radius: 6px; padding: 0.2rem 1rem; }
 .try::before { content: "Try this"; display: block; font: 700 0.75rem system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-top: 0.6rem; }
+
+/* MathML formulas (rendered natively by the browser) */
+math[display="block"] {
+  margin: 1.2rem 0;
+  font-size: 1.15em;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.2rem 0;
+}
+/* Square brackets around matrices, drawn with CSS so no math font is needed */
+math mtable.mat {
+  --b: 1.5px;
+  --t: 0.32em;
+  padding: 0.2em 0.35em;
+  margin: 0 0.15em;
+  border-left: var(--b) solid currentColor;
+  border-right: var(--b) solid currentColor;
+  background:
+    linear-gradient(currentColor, currentColor) left top / var(--t) var(--b) no-repeat,
+    linear-gradient(currentColor, currentColor) left bottom / var(--t) var(--b) no-repeat,
+    linear-gradient(currentColor, currentColor) right top / var(--t) var(--b) no-repeat,
+    linear-gradient(currentColor, currentColor) right bottom / var(--t) var(--b) no-repeat;
+}
+math mtable.mat mtd { padding: 0.1em 0.4em; }
