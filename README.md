@@ -10,8 +10,10 @@ didn't have the maths for it yet (no trigonometry), and I never got to think the
 end to end afterwards. The closest I came was a second-year university course with labs
 that drew graphs directly to video memory.
 
-This repo is me finally doing it, step by step, learning with an AI as a teacher and study
-buddy: competent, patient, and available 24/7. What a great time to learn new things!
+This repo is that idea, finally built end to end, by Claude (an AI). I watched it build the
+series step by step, asked questions until each step clicked, and learned the maths along the
+way. It's a teacher and study buddy: competent, patient, and available 24/7. What a great time
+to learn new things!
 
 **Start here:** open [`index.html`](index.html) in a browser. No server or build step
 needed. If you prefer a local server: `python3 -m http.server` and visit
