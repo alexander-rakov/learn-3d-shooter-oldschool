@@ -32,6 +32,25 @@ For a ray at angle φ off-centre, the Euclidean distance to a point is longer th
 wall facing you, the depth is <em>the same</em> for every column, so the wall should be a perfect
 rectangle. The Euclidean distance grows towards the edges, which produces the bulge.</p>
 
+<h3>But the Euclidean distance is the real distance. Why isn't it right?</h3>
+<p>It <em>is</em> the real distance from the eye to the wall. The catch is that the <strong>screen</strong>
+is further away too. Redo step 6's side-view triangle, but this time in the vertical slice that
+contains an off-centre ray instead of the centre one:</p>
+<ul>
+  <li>Along that ray, the wall is at Euclidean distance <code>D</code>.</li>
+  <li>The screen is flat, so the ray doesn't pierce it at distance 1. It pierces it at distance
+  <code>1 / cos φ</code>. (That's <code>|rayDir|</code>, the length of <code>d + c·p</code>.)</li>
+</ul>
+<p>Similar triangles in that slice give the height on screen:</p>
+<p class="math">height = (distance to screen) / (distance to wall) = (1 / cos φ) / D = 1 / (D · cos φ) = 1 / depth</p>
+<p>So the Euclidean distance isn't wrong. Dividing by it <em>alone</em> is wrong, because that assumes the
+screen is 1 unit away along every ray, as if it were a curved dome around your eye. The extra
+<code>1 / cos φ</code> to the flat screen cancels exactly into <code>D · cos φ</code>, which is the depth.
+“Depth” is just a name for that product: how far the point is <em>in front of the screen's plane</em>,
+measured straight along <code>d</code>, not along the ray.</p>
+<p>Your eye <em>does</em> have a curved retina, and on it equal angles really do take up equal space. But a
+monitor is flat, and a flat picture only looks right if it was projected onto a flat plane.</p>
+
 <figure class="demo">
   <canvas id="f-top" width="480" height="220"></canvas>
   <canvas id="f-chart" width="480" height="170" style="margin-top:8px"></canvas>
