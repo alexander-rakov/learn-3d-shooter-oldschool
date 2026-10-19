@@ -30,6 +30,27 @@ way. I'm doing it together with an AI, and it has been a surprisingly fun and pr
 to learn: a teacher and study buddy who is competent, patient, and available around the
 clock. What a great time to learn new things!</p>
 
+<h2>What surprised me along the way</h2>
+<ol>
+  <li><strong><a href="steps/01-vectors/index.html">Fixed-point numbers</a>.</strong>
+  We've had hardware floating point for so long that storing fractions as plain integers
+  (16 bits for the whole part, 16 for the fraction) feels like a stroke of genius today.
+  Then again, it's the same trick we still use for money: store cents as integers and never
+  trust a float with a balance. The only difference is that 16.16 counts in 1/65536ths
+  instead of hundredths. I was surprised anyway.</li>
+
+  <li><strong><a href="steps/06-projection/index.html">Darker N/S walls</a>.</strong>
+  Drawing one side of every wall at half brightness looks trivial today, but it adds so
+  much of a 3D feel for almost no cost: one <code>if</code> and a bit shift per column.
+  Unbelievable.</li>
+
+  <li><strong><a href="steps/07-fisheye/index.html">Euclidean distance bends straight
+  lines</a>.</strong> Photography is my hobby, so I should have seen this coming: it's the
+  difference between a fisheye and a rectilinear lens. Still, it was a surprise that the
+  fix is to account for the flat screen, by dividing by <em>depth</em> rather than by the
+  real distance to the wall.</li>
+</ol>
+
 <h2>Part 1: The maths</h2>
 <p>All top-down, all 2D. No 3D picture yet, just the tools.</p>
 <ol class="toc">
