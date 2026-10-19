@@ -3,6 +3,16 @@
 An interactive, step-by-step series that rebuilds a Wolfenstein 3D–style raycaster
 from the maths up, in plain JavaScript that runs directly in the browser.
 
+## Backstory
+
+I wanted to build a Wolfenstein-style 3D engine back in school (6th or 7th grade), but I
+didn't have the maths for it yet (no trigonometry), and I never got to think the idea through
+end to end afterwards. The closest I came was a second-year university course with labs
+that drew graphs directly to video memory.
+
+This repo is me finally doing it, step by step, learning with an AI as a teacher and study
+buddy: competent, patient, and available 24/7. What a great time to learn new things!
+
 **Start here:** open [`index.html`](index.html) in a browser. No server or build step
 needed. If you prefer a local server: `python3 -m http.server` and visit
 <http://localhost:8000>.
