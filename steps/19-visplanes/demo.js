@@ -29,11 +29,11 @@ const LEVEL = buildBSP(buildMap({
     { name: 'courtyard', floor: -0.25, ceil: 2.5, wall: 4, floorTex: 2, ceilTex: SKY, light: 255,
       loops: [[14, 15, 16, 19, 23, 24, 13, 12, 22, 11, 10], [18, 21, 20, 17]] },
     { name: 'platform', floor: 0.1, ceil: 2.5, wall: 3, floorTex: 4, ceilTex: SKY, light: 255, loops: [[18, 17, 20, 21]] },
-    { name: 'step 1', floor: -0.125, ceil: 0.975, wall: 2, floorTex: 3, light: 160, loops: [[8, 7, 26, 25]] },
-    { name: 'step 2', floor: -0.25, ceil: 0.85, wall: 2, floorTex: 3, light: 144, loops: [[25, 26, 28, 27]] },
-    { name: 'step 3', floor: -0.375, ceil: 0.725, wall: 2, floorTex: 3, light: 128, loops: [[27, 28, 30, 29]] },
-    { name: 'step 4', floor: -0.5, ceil: 0.6, wall: 2, floorTex: 3, light: 112, loops: [[29, 30, 32, 31]] },
-    { name: 'crypt', floor: -0.5, ceil: 0.6, wall: 2, floorTex: 3, ceilTex: 3, light: 96,
+    { name: 'step 1', floor: -0.125, ceil: 0.975, wall: 2, floorTex: 3, light: 176, loops: [[8, 7, 26, 25]] },
+    { name: 'step 2', floor: -0.25, ceil: 0.85, wall: 2, floorTex: 3, light: 160, loops: [[25, 26, 28, 27]] },
+    { name: 'step 3', floor: -0.375, ceil: 0.725, wall: 2, floorTex: 3, light: 144, loops: [[27, 28, 30, 29]] },
+    { name: 'step 4', floor: -0.5, ceil: 0.6, wall: 2, floorTex: 3, light: 128, loops: [[29, 30, 32, 31]] },
+    { name: 'crypt', floor: -0.5, ceil: 0.6, wall: 2, floorTex: 3, ceilTex: 3, light: 136,
       loops: [[33, 31, 32, 34, 35, 36, 37, 38, 39, 40], { v: [45, 46, 47, 48, 49, 50, 51, 52], wall: 1 }] },
   ],
 }));
@@ -131,8 +131,8 @@ function css(c) {
   viewCanvas.addEventListener('pointerleave', () => { hover = null; });
 
   animate((dt, time) => {
-    // A glowing light, like Doom's light specials: the crypt's level swings between 64 and 160.
-    CRYPT.light = Math.round(112 + 48 * Math.sin(time * 2.5));
+    // A glowing light, like Doom's light specials: the crypt's level swings between 96 and 176.
+    CRYPT.light = Math.round(136 + 40 * Math.sin(time * 2.5));
     START.light = ui['g-light'];
     movePlayer(LEVEL, player, keys, dt);
     const t0 = performance.now();
