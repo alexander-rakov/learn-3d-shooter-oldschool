@@ -202,7 +202,7 @@ function enableDrag(canvas, view, handles, onChange = null) {
 
 const GAME_KEYS = new Set([
   'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space',
-  'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ShiftLeft', 'ShiftRight',
+  'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyR', 'KeyM', 'ShiftLeft', 'ShiftRight',
 ]);
 
 /** Tracks which keys are held while `el` has focus. Returns a Set of key codes. */
