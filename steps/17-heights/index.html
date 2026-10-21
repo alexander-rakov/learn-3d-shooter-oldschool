@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Variable Heights</title>
+<link rel="stylesheet" href="../../common/style.css">
+</head>
+<body>
+<nav class="steps-nav">
+  <a href="../16-wall-segments/index.html">← Step 16: Projecting wall segments</a>
+  <a href="../../index.html">↑ Contents</a>
+  <a href="../18-bsp/index.html">Step 18: BSP trees →</a>
+</nav>
+
+<article>
+<p class="kicker">Part 4 · Step 17</p>
+<h1>Variable heights: steps, windows and portals</h1>
+<p class="lede">Give every sector its own floor and ceiling height, and a two-sided line stops being
+invisible. It becomes a step, a ledge or a window, with wall above and below an opening. A column of
+the screen can now show several things stacked up, and the order we draw in starts to matter.</p>
+
+<h2>Heights</h2>
+<p>A sector now has a <code>floor</code> and a <code>ceil</code>. Our level has stairs down into a
+crypt, a raised window between two rooms, and a sunken courtyard with a platform in it. The eye is
+<code>EYE_HEIGHT = 0.5</code> above the floor you're standing on, at height <code>eyeZ</code>.</p>
+<p>Projecting heights is step 6 again. At depth <code>v</code>, one map unit is
+<code>scale = projScale / v</code> pixels tall, and the horizon is the screen's middle row. A point at
+height <code>z</code> appears</p>
+<p class="math">y = horizon − (z − eyeZ) · scale</p>
+<p>That's the formula behind every wall so far, with <code>z = 1</code> for the top and
+<code>z = 0</code> for the bottom and the eye at 0.5. Now <code>z</code> is whatever the sector says.
+Since <code>scale</code> is <code>projScale · (1/v)</code>, and we already step <code>1/v</code>
+across the wall's columns (step 16), each column costs a multiplication per height.</p>
+
+<h2>Upper and lower walls</h2>
+<p>Stand in one sector and look across a two-sided line into the next. The line itself has no
+wall. But if the sector beyond has a lower ceiling, you see the strip of wall between the two
+ceilings hanging down above the opening: the <em>upper</em> wall, like the lintel above a door. If it
+has a higher floor, you see a strip between the two floors: the <em>lower</em> wall, like a step. In
+between is the opening, and through it you see the next sector.</p>
+<p>Which texture goes there? In Doom each sidedef has three: upper, lower and middle (for one-sided
+walls). Our sidedefs have one, and <code>buildMap</code> picks it with a simple rule. The step you see
+is the edge of the <em>other</em> sector's floor, and the lintel the edge of its ceiling, so a sidedef
+gets the other sector's wall texture.</p>
+
+<figure class="demo">
+  <canvas id="c-side" width="640" height="270"></canvas>
+  <div class="readout" id="c-readout"></div>
+  <figcaption>A side view through one screen column. The eye looks right, across a two-sided line into
+  a back sector with a far wall. Drag the back sector's ceiling and floor, and the eye. On the right is
+  the column on screen, filled the way the renderer does it: the front sector's ceiling and floor, the
+  upper and lower walls, then whatever is visible through the opening between <code>top</code> and
+  <code>bottom</code>.</figcaption>
+</figure>
+
+<h2>Clip arrays</h2>
+<p>Step 16 kept one depth per column. That's no use now: a column can show a ceiling, a lintel, a
+far wall seen through a window, a step and a floor, all at different depths. Doom's answer, and ours,
+is two numbers per column, <code>top[x]</code> and <code>bottom[x]</code>: the rows that are still
+open. Everything nearer has been drawn above <code>top</code> and below <code>bottom</code>, and
+whatever comes next must fit in between.</p>
+<p>Drawing one column of a seg goes like this:</p>
+<pre><code>const ceilY  = row where the front sector's ceiling meets this wall   // clamped to top … bottom
+const floorY = row where the front sector's floor meets it
+drawFlatColumn(x, top[x], ceilY, front.ceil);            // ceiling above the wall
+drawFlatColumn(x, floorY, bottom[x], front.floor);       // floor below it
+if (!back) {
+  drawWallColumn(x, ceilY, floorY);                      // a solid wall fills the rest…
+  top[x] = h; bottom[x] = 0;                             // …and closes the column
+} else {
+  if (back.ceil &lt; front.ceil)  draw the upper wall from ceilY down to the back ceiling;
+  if (back.floor &gt; front.floor) draw the lower wall from the back floor down to floorY;
+  top[x] = bottom of the upper wall (or ceilY);          // the opening is all that's left
+  bottom[x] = top of the lower wall (or floorY);
+}</code></pre>
+<p>The clip arrays only ever shrink. That works if, and only if, we draw <em>near to far</em>: once
+something is drawn, nothing drawn later can be in front of it. In return, every pixel is written
+exactly once. There's no overdraw at all, which step 16's depth buffer couldn't promise.</p>
+
+<h3>Floors and ceilings, column by column</h3>
+<p>A sector's floor is visible below each of its walls, from the wall's foot down to
+<code>bottom[x]</code>. So we draw it there, a column at a time, with step 10's idea: a row of a
+horizontal surface is at one depth. That depth now comes from the height difference between the eye
+and the floor:</p>
+<p class="math">rowDist = (eyeZ − z) · projScale / (y + 0.5 − horizon)</p>
+<p>With <code>z = 0</code> and <code>eyeZ = 0.5</code> that's step 10's formula. For a ceiling,
+<code>eyeZ − z</code> is negative and so is the row's distance from the horizon, so the same line
+works. But going down a column instead of along a row, nothing is constant from one pixel to the
+next: it's a division per pixel. That's the price of drawing floors in the wrong direction, and step
+19 shows how Doom avoids it.</p>
+
+<h2>Near to far: portals</h2>
+<p>Here is one way to get the near-to-far order. Start in the sector the player is standing in and
+draw all of its segs we can see. Each two-sided seg is a <em>portal</em>, a window into the next
+sector, covering columns <code>a</code> to <code>b</code>. After the sector's own walls are done, go
+through each portal and render the sector behind it, but only in the portal's columns. Anything you
+see through a window is farther away than the window, so the order is right, and the clip arrays keep
+it inside the opening:</p>
+<pre><code>function renderSector(sector, xl, xr, fromLine) {
+  for (const seg of sector.segs) {
+    if (seg.line === fromLine) continue;                 // the portal we came in through
+    const proj = projectSeg(p, seg);                     // step 16: cull, clip, project
+    if (proj.culled) continue;
+    const a = max(xl, ceil(proj.x1)), b = min(xr, ceil(proj.x2));
+    if (a &lt; b) { drawSeg(seg, proj, a, b); if (seg.back) portals.push({ seg, a, b }); }
+  }
+  for (const { seg, a, b } of portals)                   // then what's behind each window
+    if (any column from a to b is still open) renderSector(seg.back, a, b, seg.line);
+}
+renderSector(playerSector, 0, W, null);</code></pre>
+<p>One special case: standing in a doorway, the portal line can be closer than the near plane, and
+step 16's clipping would throw it away. Then it covers the whole view anyway, so we look straight
+through it.</p>
+
+<figure class="demo">
+  <div class="game" id="g-game">
+    <canvas class="view pixels" id="g-view" width="320" height="200"></canvas>
+    <canvas class="minimap" id="g-map" width="240" height="240"></canvas>
+  </div>
+  <div class="controls">
+    <label><input type="checkbox" id="g-concave"> make the courtyard one concave sector</label>
+  </div>
+  <div class="readout" id="g-readout"></div>
+  <figcaption>Click the view to move. The stairs at the south go down to a crypt; the window and the
+  passage to the east lead to a sunken courtyard with a platform you can step onto. The readout shows
+  the tree of sectors visited this frame and the columns each was drawn in. On the map, sectors are
+  coloured by how many portals deep they were reached. Hover a column to see the chain of portals it
+  was drawn through.</figcaption>
+</figure>
+
+<div class="try">
+<ul>
+  <li>Look at the window from across the start room: a lower wall below it (the sill), an upper wall
+  above it, and the courtyard through the gap. The tree shows <code>window</code> → <code>courtyard
+  N</code>.</li>
+  <li>Walk down the stairs. Each step is a sector, and its ceiling steps down too, so you see a row of
+  lintels. Turn round at the bottom and look up: now the steps' lower walls face you.</li>
+  <li>Walk up to the window and try to climb through. The sill is 0.45 high, more than the 0.375 you
+  can step up. The platform in the courtyard is 0.35 above its floor, so that one you can climb.</li>
+  <li>Tick the concave courtyard and look at the platform. It vanishes.</li>
+</ul>
+</div>
+
+<h2>The catch: convex sectors only</h2>
+<p>Within one sector, segs are drawn in the order they're listed. Nothing sorts them. That's fine if no
+seg of a sector can ever hide another seg of the same sector, and that's exactly what being
+<em>convex</em> means: from any point inside, you can see every wall in full. Looking out from inside a
+convex room, its walls never overlap on screen.</p>
+<p>The courtyard has a platform in the middle, so as a single sector it has a hole and isn't convex.
+From inside it, the platform's edges are in front of the walls behind them. With the checkbox ticked,
+the courtyard's outer walls come first in its list. They're drawn first, close their columns, and the
+platform, which is nearer, finds nothing open. In the unticked level the courtyard was split by hand
+into four convex sectors around the platform, with identical heights, so the lines between them
+are portals with no walls.</p>
+<p>Splitting every room into convex pieces by hand is tedious, and level designers shouldn't have to
+think about it. That is the job of the next step's BSP tree: it does the splitting automatically, at
+build time, and it gives the drawing order for free.</p>
+
+<h2>Moving between heights</h2>
+<p>Collision gets a rule for two-sided lines. The opening between two sectors runs from the higher
+floor to the lower ceiling. You can pass if it's at least <code>PLAYER_HEIGHT</code> (0.7) tall and
+its bottom is at most <code>MAX_STEP</code> (0.375) above the floor you're standing on:</p>
+<pre><code>function blocksMove(line, floor) {
+  if (!line.back) return true;
+  const openTop = Math.min(a.ceil, b.ceil), openBottom = Math.max(a.floor, b.floor);
+  return openTop - openBottom &lt; PLAYER_HEIGHT || openBottom - floor &gt; MAX_STEP;
+}</code></pre>
+<p>Stepping down is always allowed. After each move <code>sectorAt</code> tells us which floor we're
+on, and the eye eases towards its new height instead of jumping, which turns stairs into a smooth
+glide.</p>
+
+<aside class="retro doom">
+<h3>ceilingclip, floorclip, and someone else's portals</h3>
+<p>Doom's clip arrays are called <code>ceilingclip[]</code> and <code>floorclip[]</code>, one short
+integer per column, and <code>R_RenderSegLoop</code> narrows them exactly like our
+<code>drawSeg</code>. Each sidedef has three texture names, upper, lower and middle. Two flags on the
+linedef, <em>upper unpegged</em> and <em>lower unpegged</em>, choose how a texture is anchored: to
+the ceiling, or to the edge of the step. Mappers used them to make door tracks stay put while the
+door moves, and to keep a lift's side from sliding as it rises.</p>
+<p>The numbers are Doom's own, scaled: a step of 24 units (our 0.375) is the most you can climb, the
+player is 56 units tall, and the eye is 41 units above the floor. When you walk up a step, Doom lifts
+the player at once but lowers the view by the same amount, then lets it catch up over a few frames,
+much like our easing.</p>
+<p>Doom does <em>not</em> render through portals, though. That's the Build engine's way. Ken
+Silverman, who had written <em>Ken's Labyrinth</em>, a Wolfenstein-style game, went on to write Build,
+the engine of <em>Duke Nukem 3D</em> (1996). Build draws the player's sector, then the sectors visible
+through its two-sided walls (the red lines in its editor), recursively, much like our
+<code>renderSector</code>. It doesn't require convex sectors: it groups each sector's visible walls
+into <em>bunches</em> and works out at run time which bunch is in front. Portals also let Build do
+things a BSP can't: sectors can move and change shape while you play, and two rooms can occupy the
+same spot on the map, as long as you can never see both at once.</p>
+</aside>
+
+<h2>Next</h2>
+<p>Portal rendering needs convex sectors, or work at run time to sort walls within a sector. Doom
+took a third way: do all the sorting once, when the level is built, and store it in a tree.</p>
+</article>
+
+<nav class="steps-nav bottom">
+  <a href="../16-wall-segments/index.html">← Step 16: Projecting wall segments</a>
+  <a href="../18-bsp/index.html">Step 18: BSP trees →</a>
+</nav>
+
+<script src="../../common/diagram.js"></script>
+<script src="level.js"></script>
+<script src="renderer.js"></script>
+<script src="textures.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>
