@@ -222,7 +222,8 @@ function keyboard(el) {
 function animate(frame) {
   let last = performance.now();
   function tick(now) {
-    const dt = Math.min(0.05, (now - last) / 1000);
+    // Clamped both ways: the first timestamp can be slightly earlier than `last`.
+    const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
     last = now;
     frame(dt, now / 1000);
     requestAnimationFrame(tick);
