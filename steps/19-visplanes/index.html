@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Visplanes and Lighting</title>
+<link rel="stylesheet" href="../../common/style.css">
+</head>
+<body>
+<nav class="steps-nav">
+  <a href="../18-bsp/index.html">← Step 18: BSP trees</a>
+  <a href="../../index.html">↑ Contents</a>
+  <span></span>
+</nav>
+
+<article>
+<p class="kicker">Part 4 · Step 19</p>
+<h1>Visplanes and lighting</h1>
+<p class="lede">The last two pieces of Doom's renderer. Floors and ceilings are collected while the
+walls are drawn, then painted a row at a time, the fast direction from step 10. And light becomes a
+property of each sector, fading with distance, done entirely with a lookup table into 256 colours.</p>
+
+<h2>Floors want rows, walls want columns</h2>
+<p>Since step 17 we've drawn floors down each column, with a division for every pixel, because the
+columns are where the BSP walk is. But a floor is cheapest drawn along a <em>row</em>: every pixel of
+a row is at the same depth (step 10), so a row needs one division and then two additions per pixel.
+The trouble is that the walk produces floor in column-sized pieces, cut off at different heights by
+the walls and steps in front. We can't draw a whole row of floor; only the parts of rows that are
+actually floor, and actually this floor.</p>
+<p>Doom's solution is to not draw floors during the walk at all, but to write down where they go.
+When a seg is drawn, the rows of each column above it (ceiling) and below it (floor) are recorded in a
+<em>visplane</em>: a record of one flat surface, identified by its height, texture and light level,
+with a top and bottom row for each screen column it covers.</p>
+<pre><code>// in drawSeg, for each column x, instead of drawing:
+markPlane(r.ceilPlane, x, top[x], ceilY);      // ceiling rows above the wall
+markPlane(r.floorPlane, x, floorY, bottom[x]); // floor rows below it</code></pre>
+<p>Every subsector looks up its floor's visplane, and its ceiling's, before drawing its segs:
+<code>findPlane(height, texture, light)</code> returns an existing visplane with the same three values
+if there is one, so the whole floor of a room is usually one visplane, even if it's seen in many
+pieces, and two different rooms with identical floors share one too. Only a floor below the eye, or a
+ceiling above it, can be seen at all.</p>
+<p>A visplane holds one run of rows per column, though. If the same floor shows up again in a column it
+already has, for example beyond a low wall that hides the middle of it, the second piece goes into a
+new visplane with the same values. <code>checkPlane</code> handles that, for each seg, before marking
+anything.</p>
+
+<h3>From columns to spans</h3>
+<p>After the walk, every visplane is turned into horizontal <em>spans</em>. Go through its columns left
+to right, and compare the rows of column <code>x − 1</code> with those of column <code>x</code>:</p>
+<ul>
+  <li>a row that's in the previous column but not this one is the end of a span: draw it, from where it
+  started up to <code>x − 1</code>;</li>
+  <li>a row that's in this column but not the previous one is the start of a span: remember
+  <code>spanStart[y] = x</code>.</li>
+</ul>
+<pre><code>function makeSpans(x, t1, b1, t2, b2) {   // rows t1…b1 at x − 1, t2…b2 at x
+  while (t1 &lt; t2 &amp;&amp; t1 &lt;= b1) { mapPlane(t1, spanStart[t1], x - 1); t1++; }   // ended at the top
+  while (b1 &gt; b2 &amp;&amp; b1 &gt;= t1) { mapPlane(b1, spanStart[b1], x - 1); b1--; }   // ended at the bottom
+  while (t2 &lt; t1 &amp;&amp; t2 &lt;= b2) { spanStart[t2] = x; t2++; }                   // started at the top
+  while (b2 &gt; b1 &amp;&amp; b2 &gt;= t2) { spanStart[b2] = x; b2--; }                   // started at the bottom
+}</code></pre>
+<p>Since the rows of a visplane's column are always one unbroken run, the only rows that change between
+two columns are at the top and the bottom of the run, which is why four short loops cover every case.
+The visplane has an empty column on either side, so every span gets closed. Then <code>mapPlane</code>
+draws one span, and it's step 10's row loop with one change: the row's distance now depends on how far
+the surface is above or below the eye.</p>
+<p class="math">rowDist = |eyeZ − height| · projScale / |y + 0.5 − horizon|</p>
+
+<h2>Light</h2>
+<p>Doom's sectors each have a <em>light level</em> from 0 to 255. On top of that, light fades with
+distance, so a dark room's far end disappears into gloom while the walls next to you are still clear.
+In a bright room, light 255, nothing fades at all. This is the famous Doom atmosphere, and it costs
+almost nothing, thanks to two old tricks.</p>
+
+<h3>256 colours and a COLORMAP</h3>
+<p>Doom ran in VGA mode 13h, where each pixel is one byte: not a colour, but an index into a
+<em>palette</em> of 256 colours. Textures are stored the same way, as palette indices. Darkening a
+texel can't be done by multiplying, because there's no colour to multiply, only an index. Instead
+there's a table, the <code>COLORMAP</code>. It has 32 rows, one per light level from full bright
+(0) to black (31), and each row lists, for every palette index, the index of the palette colour
+closest to that colour darkened:</p>
+<pre><code>pixel = COLORMAP[level * 256 + texel];   // lighting, in one lookup</code></pre>
+<p>Our textures are still drawn in true colour by code. At startup they're reduced to 256 colours,
+with a palette chosen by <em>median cut</em>: put all the texture colours in one box, repeatedly cut the
+box with the widest spread of red, green or blue in half at the median, and stop at 255 boxes. Each
+box's average colour is a palette entry (plus black). Darkened copies of every colour go into the
+boxes too, so the palette has dark shades for the COLORMAP's darker rows to land on.</p>
+
+<figure class="demo">
+  <canvas id="c-map" width="640" height="172"></canvas>
+  <div class="readout" id="c-readout"></div>
+  <figcaption>Our palette, and the COLORMAP below it: each column is one palette entry, each row a light
+  level. Hover a cell to see the darkened colour and the palette entry it was rounded to. Towards the
+  bottom, neighbouring colours merge, and some drift in hue, because the palette has only so many dark
+  shades to offer.</figcaption>
+</figure>
+
+<h3>Which row of the COLORMAP?</h3>
+<p>The level for a wall column or a floor row comes from two things: the sector's light, and the
+depth. Doom's formula, in our units, is</p>
+<p class="math">level = (15 − light/16) · 4 − 20 / depth &nbsp;&nbsp;&nbsp; clamped to 0 … 31</p>
+<p>The first part is how dark the sector is far away: 0 (full bright) for light 255, beyond 31 for
+dark sectors. The second makes things brighter as they get nearer, by 20 levels at a depth of 1 and
+fading off as 1/depth. Depth is constant down a wall column and along a floor row, so the light level is
+too: one table row per column or per span, the same reason step 14's light falloff was cheap.</p>
+<p>Walls get one more adjustment, Doom's version of step 6's darker walls: a wall running exactly
+east–west is one light step (16) darker than its sector, one running exactly north–south is one step
+brighter, and slanted walls get neither. It's called <em>fake contrast</em>, and it's why Doom's corners
+look sharp even in flat light.</p>
+
+<h3>The sky</h3>
+<p>The courtyard has no ceiling: its ceiling texture is the sky. The sky isn't a surface at any height;
+it's a picture infinitely far away. Its columns are chosen by the direction you're looking (the
+picture repeats four times around the horizon), its rows by the screen row, and it's always full bright.
+When a ceiling is sky, its visplane is drawn this way instead of as spans.</p>
+
+<figure class="demo">
+  <div class="game" id="g-game">
+    <canvas class="view pixels" id="g-view" width="320" height="200"></canvas>
+    <canvas class="minimap" id="g-map" width="240" height="240"></canvas>
+  </div>
+  <div class="controls">
+    <label><input type="checkbox" id="g-planes"> show visplanes</label>
+    <label><input type="checkbox" id="g-diminish" checked> light fades with distance</label>
+    <label><input type="checkbox" id="g-true"> exact colours (no COLORMAP)</label>
+    <label>start room light <input type="range" id="g-light" min="0" max="255" step="1" value="176"> <output for="g-light"></output></label>
+  </div>
+  <div class="readout" id="g-readout"></div>
+  <figcaption>The whole renderer: BSP walls, visplane floors and ceilings, light and sky. Click the view
+  to move. The courtyard is open to the sky and fully lit; the stairs get darker on the way down; the
+  crypt's light glows up and down. Hover the view to see which visplane a pixel belongs to and its light
+  level. On the map, brighter sectors are lighter.</figcaption>
+</figure>
+
+<div class="try">
+<ul>
+  <li>Show the visplanes. Each flat colour is one visplane. The whole start-room floor is one, even
+  where the pillar cuts it in two. In the courtyard, the floor in front of the platform and the floor
+  behind it share columns, so the same floor needs two visplanes.</li>
+  <li>Walk down to the crypt and watch the far wall breathe as its light swings between 64 and
+  160.</li>
+  <li>Turn the start room's light down to about 80 and look along the room: it fades to black in the
+  distance, while the courtyard through the window stays bright.</li>
+  <li>Compare with exact colours, which dims the true colour instead of looking up the palette. In the
+  dark the COLORMAP version is grainier and slightly off in hue. That's the 256-colour look.</li>
+  <li>Turn off the fading: each sector is lit evenly, and the level looks much flatter.</li>
+</ul>
+</div>
+
+<aside class="retro doom">
+<h3>Visplanes, COLORMAP and PLAYPAL</h3>
+<p>Doom's visplanes, <code>R_FindPlane</code>, <code>R_CheckPlane</code> and <code>R_MakeSpans</code>,
+are what you've just seen. The original engine had room for only 128 visplanes per frame. A complex
+enough view, with many floors of different heights or light levels, ran out, and the game quit with
+“R_FindPlane: no more visplanes”. Mappers learned to stay under the limit; later source ports raised
+it or removed it.</p>
+<p>Spans are drawn by <code>R_DrawSpan</code> from 64 × 64 textures called <em>flats</em>, with the
+texture position stepped in fixed point: step 10's loop, with an assembly-friendly packing of the two
+coordinates. The light level is picked from precomputed tables (<code>scalelight</code> for walls,
+indexed by on-screen scale, <code>zlight</code> for floors, indexed by distance), which is where our
+formula comes from. The flash of your own gun adds an <code>extralight</code> that brightens everything
+for a moment.</p>
+<p>The <code>COLORMAP</code> lump has 34 tables: the 32 light levels, one inverted greyscale map for
+the invulnerability power-up, and one all black. The palette lump, <code>PLAYPAL</code>, holds 14
+palettes. Only the first is the normal one; the others are tinted red for pain, gold for picking things
+up and green for the radiation suit. That's step 14's palette flash: switching to one of them recolours
+the whole screen at once.</p>
+<p>A sector whose ceiling texture is <code>F_SKY1</code> shows the sky, a 256-pixel-wide texture
+drawn by view angle at full brightness, which doesn't move when you go up or down stairs. Light
+specials on a sector, such as flickering, strobing and glowing, just change its light level every few
+tics, exactly like our crypt.</p>
+</aside>
+
+<h2>What we have</h2>
+<p>That's Part 4, and the end of the series. From a grid of cubes we went to a level drawn as polygons;
+walls projected from their two ends, with perspective-correct textures; sectors with their own floors,
+ceilings and light; a BSP tree that hands us the walls in the right order, so every pixel is drawn
+exactly once; floors drawn as spans; and lighting done with a table. Those are the core ideas of Doom's
+renderer, in under a thousand lines of engine code, comments included.</p>
+<p>Some of Doom is still missing: sprites (things are drawn after the walls, far to near, clipped
+against the walls in front of them, much like step 11), moving floors and ceilings for doors and lifts
+(only the heights change, so the BSP tree survives), and transparent middle textures such as bars and
+fences. Each of these builds on pieces you've now seen.</p>
+<p>After Doom, Quake (1996) went fully 3D: rooms above rooms, looking up and down, polygons at any
+angle. It kept the BSP tree, added precomputed visibility between its leaves, and divided for
+perspective every 16 pixels. A few years later, 3D graphics cards took over the pixel work, and the
+problems this series solved by hand moved into hardware. The ideas didn't go away: camera matrices,
+clipping, perspective-correct interpolation and front-to-back drawing still run on every GPU, millions
+of times per frame.</p>
+</article>
+
+<nav class="steps-nav bottom">
+  <a href="../18-bsp/index.html">← Step 18: BSP trees</a>
+  <a href="../../index.html">↑ Contents</a>
+</nav>
+
+<script src="../../common/diagram.js"></script>
+<script src="level.js"></script>
+<script src="bsp.js"></script>
+<script src="renderer.js"></script>
+<script src="colormap.js"></script>
+<script src="textures.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>
