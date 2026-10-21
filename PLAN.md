@@ -53,27 +53,31 @@ original games.
 New files: `sprites.js` (from step 11), `game.js` (from step 13: robots, shooting,
 pickups, kept apart from the engine in `raycaster.js`), `hud.js` and `audio.js` (step 14).
 
-## Part 4: How Doom did it differently (later)
+## Part 4: How Doom did it differently ✅
 
-15. **From grids to polygons** — vertices, linedefs, sidedefs, sectors; why
-    arbitrary angles break the "one cell = one DDA step" trick.
-16. **Projecting wall segments** — transform segment endpoints into camera space
-    (same `M⁻¹`), near-plane clipping, then draw columns between the projected
-    endpoints, interpolating `1/z` (perspective-correct texturing).
-17. **Variable heights** — per-sector floor/ceiling heights, upper/lower wall
-    parts, portals between sectors, per-column top/bottom clip arrays.
-18. **BSP trees** — building one (choosing splitters, splitting lines),
-    front-to-back traversal, "solid segs" to stop when every column is filled.
-19. **Visplanes and lighting** — floors/ceilings as spans (builds on step 10),
-    sector light levels, `COLORMAP` distance fading.
-    *Aside:* Ken Silverman (Ken's Labyrinth) went on to write the Build engine
-    (Duke Nukem 3D), which uses portals instead of BSP.
+| # | Step | Key ideas | 1993 box |
+|---|------|-----------|----------|
+| 15 | From grids to polygons | vertices, linedefs, sidedefs, sectors built from sector outlines, front = right of v1 → v2, `sectorAt`, the 2D cross product, ray vs. every linedef, textures along a line, circle vs. segment collision | WAD lumps, `BLOCKMAP` |
+| 16 | Projecting wall segments | endpoints into camera space (`M⁻¹`), back-face culling, near-plane clipping, 1/z and along/z linear in screen x (perspective-correct vs. affine), one-row depth buffer | `R_AddLine` angles, `rw_scalestep`, why Doom never divides per pixel |
+| 17 | Variable heights | per-sector floor/ceiling, segs, upper/lower walls, clip arrays (`top`/`bottom`), floors per column, portal rendering (needs convex sectors), step height and headroom | `ceilingclip`/`floorclip`, pegging, the Build engine's portals |
+| 18 | BSP trees | partitions, node builder (choose, split with texture offsets, convex subsectors), front-to-back walk, solid segs, bounding boxes, `subsectorAt` | `NODES`/`SSECTORS`/`SEGS`, `R_RenderBSPNode`, why the map can't move sideways |
+| 19 | Visplanes and lighting | visplanes (`findPlane`, `checkPlane`), columns to spans (`makeSpans`), spans as step 10 rows, median-cut palette, COLORMAP, Doom's light formula, fake contrast, the sky | `MAXVISPLANES`, `COLORMAP`/`PLAYPAL`, light specials |
+
+Part 4 has its own engine: `level.js` (the map), `renderer.js` (copied forward like
+`raycaster.js`), `bsp.js` (step 18) and `colormap.js` (step 19). Textures are shared in
+spirit with Part 2 (`textures.js`), plus flats and a sky. Each step's 1993 box is titled
+“How Doom did it in 1993” (`aside.retro.doom`).
+
+The Ken Silverman / Build aside went into step 17, next to our own portal renderer, rather
+than step 19.
 
 ## Open questions / ideas
 
 - Blog publishing: GitHub Pages straight from this repo will work as-is (no build).
 - Part 3 kept the engine (`raycaster.js`) and the game (`game.js`) apart rather than adding
-  an "engine API". Part 4 replaces the grid, so it will need its own renderer anyway.
+  an "engine API". Part 4 replaced the grid with its own renderer (`renderer.js`).
+- Possible Part 4 extras: sprites in the Doom renderer (vissprites clipped by drawsegs),
+  moving floors and ceilings (doors, lifts), transparent middle textures.
 - Possible extra step between 10 and 11: performance (typed arrays, avoiding
   allocations in the frame loop, measuring frame time), plus a fixed-point
   version of `castRay` as a 1992 experiment.
