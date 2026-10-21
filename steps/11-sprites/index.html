@@ -24,7 +24,8 @@ behind walls takes one number per screen column.</p>
 <h2>Billboards</h2>
 <p>A sprite is a picture standing upright at a point on the floor, turned to face the camera,
 whichever way the camera looks. That sounds like a cheat, and it is, but it's a very good one.
-Because the picture is always parallel to the screen, every texel of it is at the <em>same depth</em>.
+Because the picture is always parallel to the screen, every texel of it (every pixel of the picture,
+step 9) is at the <em>same depth</em>.
 That's exactly the property that made wall columns cheap in step 9: one scale factor for the whole
 sprite, and no perspective distortion to correct.</p>
 <p>Our sprites are 64 × 64 texels, like the wall textures, and they are drawn exactly as tall as a
@@ -80,8 +81,12 @@ wall slice per column, and the whole slice is at one depth. So while drawing wal
 <pre><code>zBuffer[x] = dist;   // the wall depth of column x</code></pre>
 <p>and each sprite column is drawn only if the sprite is nearer: <code>v &lt; zBuffer[x]</code>. That's
 320 numbers for the whole screen.</p>
-<p>This is where step 7 pays off a second time. The wall depth and the sprite's <code>v</code> must
-measure the same thing for the comparison to make sense. DDA's <code>t</code> is the perpendicular
+<p>This is where step 7 pays off a second time. As a reminder: step 7 was the fisheye problem. Dividing
+by the straight-line (Euclidean) distance to a wall made straight walls bulge, because perspective
+divides by <em>depth</em>, the distance measured straight along the view direction <code>d</code>. And
+DDA's <code>t</code>, for a ray built as <code>d + c·p</code>, turned out to be exactly that depth.</p>
+<p>Here, the wall depth and the sprite's <code>v</code> must measure the same thing for the comparison
+to make sense. DDA's <code>t</code> is the perpendicular
 depth, and so is <code>v</code>. If we had stored the Euclidean distance to the wall instead, it would
 be too large towards the screen edges, and sprites just behind a wall would poke through it at the
 sides of the view.</p>

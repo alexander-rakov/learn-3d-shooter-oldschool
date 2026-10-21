@@ -24,6 +24,10 @@ column, and one from screen rows to texture rows. First, though, we need a textu
 <p>Wolfenstein's textures are 64 × 64 pixels, and so are ours. Rather than shipping image files, we
 generate them at startup in <code>textures.js</code>. That keeps everything in code you can read and
 tweak, and it's a nice exercise in thinking per-texel.</p>
+<p>A <strong>texel</strong> (short for “texture element”) is one pixel of a texture. The word keeps the
+two kinds of pixel apart: a <em>texel</em> lives in the 64 × 64 picture, a <em>pixel</em> lives on the
+screen. Drawing a wall means deciding, for every screen pixel, which texel to copy into it. Up close
+one texel covers many pixels; far away many texels share one pixel and most are skipped.</p>
 <p>A texel at <code>(u, v)</code> (column, row) decides what it is from its coordinates alone:</p>
 <ol>
   <li><strong>Which brick?</strong> Rows are 16 texels tall, so <code>row = floor(v / 16)</code>.
