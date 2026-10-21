@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sprites</title>
+<link rel="stylesheet" href="../../common/style.css">
+</head>
+<body>
+<nav class="steps-nav">
+  <a href="../10-floor-ceiling/index.html">← Step 10: Floor and ceiling</a>
+  <a href="../../index.html">↑ Contents</a>
+  <a href="../12-doors/index.html">Step 12: Doors and push-walls →</a>
+</nav>
+
+<article>
+<p class="kicker">Part 3 · Step 11</p>
+<h1>Sprites: objects and enemies</h1>
+<p class="lede">A world made only of walls is a maze, not a place. Barrels, lamps and enemies in
+Wolfenstein are <em>sprites</em>: flat pictures that always face the camera. Placing one on screen is
+the camera-space transform from step 3. Drawing it is a scaled wall column with holes in it. Hiding it
+behind walls takes one number per screen column.</p>
+
+<h2>Billboards</h2>
+<p>A sprite is a picture standing upright at a point on the floor, turned to face the camera,
+whichever way the camera looks. That sounds like a cheat, and it is, but it's a very good one.
+Because the picture is always parallel to the screen, every texel of it (every pixel of the picture,
+step 9) is at the <em>same depth</em>.
+That's exactly the property that made wall columns cheap in step 9: one scale factor for the whole
+sprite, and no perspective distortion to correct.</p>
+<p>Our sprites are 64 × 64 texels, like the wall textures, and they are drawn exactly as tall as a
+wall: the bottom row stands on the floor and the top row touches the ceiling. Small objects leave
+most of the picture transparent. A lamp is a sprite whose few opaque texels are at the top; a barrel
+uses only the bottom half.</p>
+
+<h2>Where on screen: camera space again</h2>
+<p>Step 3 already did the hard part. For a sprite at world point <code>q</code>, the inverse camera
+matrix gives its camera coordinates: <code>v</code>, the depth in front of us, and <code>u</code>, the
+sideways offset in units of <code>p</code>.</p>
+<pre><code>function toCameraSpace(p, x, y) {
+  const rx = x - p.x, ry = y - p.y;                       // q − pos
+  const invDet = 1 / (p.planeX * p.dirY - p.dirX * p.planeY);
+  return {
+    u: invDet * ( p.dirY   * rx - p.dirX   * ry),
+    v: invDet * (-p.planeY * rx + p.planeX * ry),
+  };
+}</code></pre>
+<p>Then it's the two divisions we've used all along. The sprite's centre lands on screen column
+<code>screenX</code>, and it's as tall as a wall at the same depth:</p>
+<p class="math">screenX = (W/2) · (1 + u / v) &nbsp;&nbsp;&nbsp; size = projScale / v</p>
+<p>The sprite is a square of side <code>size</code>, centred on <code>screenX</code> horizontally and
+on the horizon vertically. If <code>v</code> is negative the sprite is behind us. Step 3's
+<em>Try this</em> warned that without a check it would come out mirrored. If <code>v</code> is tiny, the
+sprite would be enormous, so anything nearer than a small <code>NEAR_PLANE</code> (0.2) is skipped.</p>
+
+<h2>Drawing it: columns with holes</h2>
+<p>A sprite is drawn the way a wall is: column by column, stepping through the texture with a fixed
+increment. Two things are new. The texture column is now <em>also</em> a linear function of the
+screen column, since the picture is flat and faces us. And a texel value of 0 means transparent, so we
+skip it and leave whatever is behind.</p>
+<pre><code>const step = TEX / size;                         // texels per screen pixel
+for (let x = x0; x &lt; x1; x++) {
+  if (v &gt;= zBuffer[x]) continue;                 // a wall is in front (next section)
+  const texCol = ((x + 0.5 - left) * step | 0) * TEX;
+  let texPos = (y0 + 0.5 - top) * step;
+  for (let y = y0; y &lt; y1; y++) {
+    const color = img.pixels[texCol + (texPos | 0)];
+    texPos += step;
+    if (color !== 0) pixels[y * w + x] = color;  // 0 = transparent
+  }
+}</code></pre>
+<p>Zero works as “transparent” because every real colour from <code>rgb()</code> has its alpha byte set
+to 255, so no opaque pixel is ever 0. For each sprite we also store the first and last column that
+contains anything (<code>img.left</code>, <code>img.right</code>), and only loop over the screen columns
+in between. The empty margins of a lamp or a barrel cost nothing.</p>
+
+<h2>Behind walls: a depth buffer one row tall</h2>
+<p>A sprite behind a wall must not be drawn over it. A general 3D renderer keeps a depth value for
+every pixel. We can get away with one per <em>column</em>, because the wall pass draws exactly one
+wall slice per column, and the whole slice is at one depth. So while drawing walls we keep</p>
+<pre><code>zBuffer[x] = dist;   // the wall depth of column x</code></pre>
+<p>and each sprite column is drawn only if the sprite is nearer: <code>v &lt; zBuffer[x]</code>. That's
+320 numbers for the whole screen.</p>
+<p>This is where step 7 pays off a second time. As a reminder: step 7 was the fisheye problem. Dividing
+by the straight-line (Euclidean) distance to a wall made straight walls bulge, because perspective
+divides by <em>depth</em>, the distance measured straight along the view direction <code>d</code>. And
+DDA's <code>t</code>, for a ray built as <code>d + c·p</code>, turned out to be exactly that depth.</p>
+<p>Here, the wall depth and the sprite's <code>v</code> must measure the same thing for the comparison
+to make sense. DDA's <code>t</code> is the perpendicular
+depth, and so is <code>v</code>. If we had stored the Euclidean distance to the wall instead, it would
+be too large towards the screen edges, and sprites just behind a wall would poke through it at the
+sides of the view.</p>
+
+<h2>In front of each other: the painter's algorithm</h2>
+<p>The depth buffer only knows about walls. Sprites don't write to it, so when two sprites overlap on
+screen, the one drawn last wins. The fix is the oldest one in graphics: sort them by depth and draw
+the farthest first, the way a painter paints the background before the foreground.</p>
+<pre><code>visible.sort((a, b) =&gt; b.v - a.v);   // largest depth first</code></pre>
+<p>In general 3D graphics the painter's algorithm has a famous flaw: two polygons can each be partly in
+front of the other, and no order is right. Billboards can't do that. They are all parallel to the
+screen, each at a single depth, so they can never cut through each other, and sorting by
+<code>v</code> is always exactly right. We sort by <code>v</code> rather than by distance for the same
+reason: depth is what decides who covers whom.</p>
+
+<figure class="demo">
+  <div class="game" id="g-game">
+    <canvas class="view pixels" id="g-view" width="320" height="200"></canvas>
+    <canvas class="minimap" id="g-map" width="240" height="240"></canvas>
+  </div>
+  <div class="controls">
+    <label><input type="checkbox" id="g-depth" checked> depth buffer</label>
+    <label><input type="checkbox" id="g-sort" checked> sort far to near</label>
+    <label><input type="checkbox" id="g-boxes"> show sprite squares</label>
+    <label><input type="checkbox" id="g-turn" checked> robots turn</label>
+  </div>
+  <div class="readout" id="s-readout"></div>
+  <canvas id="s-sheet" width="536" height="170" style="margin-top:10px"></canvas>
+  <figcaption>Move as before (click, then <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd>,
+  <kbd>A</kbd> <kbd>D</kbd>, <kbd>Shift</kbd>). Pillars, barrels, plants and robots block you; lamps hang
+  from the ceiling. Hover a sprite to see its camera-space coordinates: on the minimap, the dashed
+  <span style="color:#ef476f">v·d</span> then <span style="color:#06d6a0">u·p</span> lead from you to it.
+  The sheet below shows every picture used, with the one you're hovering highlighted.</figcaption>
+</figure>
+
+<div class="try">
+<ul>
+  <li>Turn off the depth buffer: robots and barrels show through the walls in front of them.</li>
+  <li>Turn off sorting, then line up two sprites, for example the two barrels below the start
+  corridor. Depending on where you stand, the far one is drawn over the near one.</li>
+  <li>Walk in a circle around a robot and watch the rotation frame in the readout. The picture snaps
+  every 45°. That snapping is very Wolfenstein.</li>
+  <li>Show the sprite squares: every sprite really is a full square, as tall as a wall. Most of it is
+  transparent.</li>
+</ul>
+</div>
+
+<h2>Making the sprites</h2>
+<p>As with the textures, there are no image files. Every sprite is drawn by code in
+<code>sprites.js</code> at startup, out of a few simple shapes: balls, rods, cylinders and bevelled
+boxes. Each shape is shaded with the same idea: work out the surface's <em>normal</em> (the direction
+it faces) at each texel, and compare it with a light coming from the top-left, as with the bevels on
+the bricks.</p>
+<p>For a ball of radius r, a texel at offset <code>(nx, ny)</code> from the centre (in units of r) is on
+the surface facing <code>(nx, ny, √(1 − nx² − ny²))</code>: the third part points towards the viewer.
+The brightness is a bit of ambient light plus the part that faces the light:</p>
+<p class="math">k = 0.38 + 0.8 · max(0, n · L) &nbsp;(+ a small highlight)</p>
+<p>A barrel is a cylinder whose radius bulges in the middle, with darker stripes for staves and
+hoops. The pillar's grooves, the lamp's cone and the plant's leaves are variations on the same few
+lines. Finally every sprite gets a dark one-texel outline, which keeps it readable against busy brick
+walls.</p>
+
+<h3>Eight directions</h3>
+<p>A barrel looks the same from every side; an enemy shouldn't. Wolfenstein's enemies have 8
+pictures, one for every 45° around them, and the game picks the one that matches where you are
+standing.</p>
+<p>Our robot is built from parts placed in its own little 3D space: X to its right, Z to its front, and
+Y the sprite row. To see it from angle θ (θ = 0 from the front, 90° from its right side), each part is
+rotated with step 2's rotation matrix:</p>
+<p class="math">column = 32 − X·cos θ + Z·sin θ &nbsp;&nbsp;&nbsp; depth = X·sin θ + Z·cos θ</p>
+<p>The parts are drawn far to near by that depth. It's the painter's algorithm again, this time inside
+one sprite. The backpack and antenna stick out behind it and the eye visor faces forward, so
+you can tell which way it faces. Drawing it at θ = 0°, 45°, …, 315° gives 8 sprites, and 4 walking
+poses for each direction give the walking robot 32 more.</p>
+<p>At runtime, choosing the frame is one <code>atan2</code>: the direction from the robot to us, minus
+the direction the robot faces, rounded to the nearest 45°.</p>
+<pre><code>function rotationFrame(obj, p) {
+  const toViewer = Math.atan2(p.y - obj.y, p.x - obj.x);
+  const k = Math.round((toViewer - obj.angle) / (Math.PI / 4));
+  return ((k % 8) + 8) % 8;     // 0 = it faces us, 2 = we're on its right, 4 = its back
+}</code></pre>
+
+<aside class="retro">
+<h3>Posts, spotvis and wallheight</h3>
+<p>Wolfenstein's sprites live in <code>VSWAP</code> next to the walls, in a format built for skipping
+transparency. Each sprite stores <code>leftpix</code> and <code>rightpix</code> (our
+<code>left</code>/<code>right</code>), and for every column in between a list of <em>posts</em>: runs of
+opaque texels, given as start row, end row and the texels themselves. The scaler draws each post with
+the same compiled scaling code as the walls and jumps over the gaps, so transparent texels aren't
+even visited.</p>
+<p>The depth buffer is an array called <code>wallheight[]</code>. It holds each column's wall
+<em>height</em> on screen rather than its depth. Height is <code>projScale / depth</code>, so the test is
+the same one flipped: a sprite column is drawn if the sprite is taller than the wall there.</p>
+<p>It also gets visibility nearly for free. While casting rays, every map tile a ray passes through
+is marked in a 64 × 64 table called <code>spotvis</code>. When it's time to draw sprites, objects in
+unmarked tiles (behind walls, out of view) are skipped without any maths. For moving enemies, which
+can straddle two tiles, the neighbouring tiles are checked too. The visible ones go into a list, and
+are drawn farthest first by picking the smallest one each time, a plain selection sort, which is
+plenty for a few dozen sprites.</p>
+<p>Enemies have 8 rotation pictures for standing and walking. A function called
+<code>CalcRotate</code> picks one from the angle between the enemy's direction and the line to the
+player, exactly like <code>rotationFrame</code>.</p>
+</aside>
+
+<h2>Next</h2>
+<p>The robots stand around in rooms with no way in or out. Wolfenstein's levels are rooms connected by
+sliding doors, and a few walls that slide away when you push them. Both are walls that sit in the
+middle of a cell, or move.</p>
+</article>
+
+<nav class="steps-nav bottom">
+  <a href="../10-floor-ceiling/index.html">← Step 10: Floor and ceiling</a>
+  <a href="../12-doors/index.html">Step 12: Doors and push-walls →</a>
+</nav>
+
+<script src="../../common/diagram.js"></script>
+<script src="raycaster.js"></script>
+<script src="textures.js"></script>
+<script src="sprites.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>

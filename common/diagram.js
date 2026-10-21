@@ -202,7 +202,7 @@ function enableDrag(canvas, view, handles, onChange = null) {
 
 const GAME_KEYS = new Set([
   'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space',
-  'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ShiftLeft', 'ShiftRight',
+  'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'KeyR', 'KeyM', 'ShiftLeft', 'ShiftRight',
 ]);
 
 /** Tracks which keys are held while `el` has focus. Returns a Set of key codes. */
@@ -222,7 +222,8 @@ function keyboard(el) {
 function animate(frame) {
   let last = performance.now();
   function tick(now) {
-    const dt = Math.min(0.05, (now - last) / 1000);
+    // Clamped both ways: the first timestamp can be slightly earlier than `last`.
+    const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
     last = now;
     frame(dt, now / 1000);
     requestAnimationFrame(tick);

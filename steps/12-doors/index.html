@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Doors and Push-walls</title>
+<link rel="stylesheet" href="../../common/style.css">
+</head>
+<body>
+<nav class="steps-nav">
+  <a href="../11-sprites/index.html">← Step 11: Sprites</a>
+  <a href="../../index.html">↑ Contents</a>
+  <a href="../13-shooting/index.html">Step 13: Shooting and enemies →</a>
+</nav>
+
+<article>
+<p class="kicker">Part 3 · Step 12</p>
+<h1>Doors and push-walls</h1>
+<p class="lede">Wolfenstein's levels are rooms joined by sliding doors, plus the odd secret wall that
+slides away when you push it. Both break the rule our renderer is built on, that every wall sits on a
+grid line. A door sits in the middle of its cell; a push-wall moves. One small addition to DDA handles
+both.</p>
+
+<h2>A door is a wall across the middle of a cell</h2>
+<p>In the map a door is a <code>|</code> (it runs north–south, so you walk through it east–west) or a
+<code>-</code>. It gets its own cell value, <code>DOOR</code>, and its state lives in a separate list:
+how far open it is, and what it's doing.</p>
+<p>When DDA steps into a door cell, it doesn't stop at the grid line it just crossed. Instead it asks
+where the ray crosses the line through the <em>middle</em> of the cell. For a <code>|</code> door
+that's the line <code>x = mapX + 0.5</code>:</p>
+<p class="math">t = (mapX + 0.5 − posX) / rayDirX &nbsp;&nbsp;&nbsp; along = posY + t · rayDirY − mapY</p>
+<p><code>along</code> is how far along the door the crossing is, from 0 to 1. If it's outside that
+range, the ray leaves through the side of the cell before reaching the middle: it's heading into the
+wall beside the door.</p>
+<pre><code>function crossInCell(vertical, line, mapX, mapY, posX, posY, rayDirX, rayDirY) {
+  const t = vertical ? (line - posX) / rayDirX : (line - posY) / rayDirY;
+  if (!(t &gt; 0)) return null;                    // behind us (or parallel: NaN)
+  const along = vertical ? posY + t * rayDirY - mapY : posX + t * rayDirX - mapX;
+  return along &gt;= 0 &amp;&amp; along &lt; 1 ? { t, along } : null;
+}</code></pre>
+<p>This is the same intersection DDA does all the time, just with a line half a cell further in. And
+because the ray is still <code>d + c·p</code>, <code>t</code> is still depth. The fisheye fix,
+the wall height and the sprites' depth buffer all work unchanged.</p>
+<p>Why the middle, and not the edge of the cell? A door flush with the wall would look like a painted
+rectangle. Set back half a cell, it sits in a recess with visible sides, and that's what makes it read
+as a doorway.</p>
+
+<h3>Door frames</h3>
+<p>The sides of that recess are the walls next to the door cell. They'd normally show bricks, but a
+doorway looks much better with a metal frame there. Spotting them is easy: if the cell DDA was in just
+before hitting a wall is a door cell, the wall is a door frame. <code>castRay</code> keeps the previous
+cell's value and reports <code>doorFrame: prev === DOOR</code>.</p>
+
+<h2>Sliding open</h2>
+<p>Each door has an <code>open</code> value from 0 (shut) to 1 (fully open). The panel slides sideways
+into the wall, so it covers <code>along</code> from <code>open</code> to 1. A ray that crosses the
+middle line at a smaller <code>along</code> goes through the gap, and DDA carries on into the room
+beyond.</p>
+<pre><code>if (cell === DOOR) {
+  const door = map.doors.get(mapY * map.w + mapX);
+  const line = door.vertical ? mapX + 0.5 : mapY + 0.5;
+  const c = crossInCell(door.vertical, line, mapX, mapY, posX, posY, rayDirX, rayDirY);
+  if (c &amp;&amp; c.along &gt;= door.open) {
+    return { t: c.t, side: door.vertical ? 0 : 1, door, wallX: c.along - door.open, … };
+  }
+  continue;   // through the gap, or out the side towards a door frame
+}</code></pre>
+<p>The texture coordinate is <code>along − open</code>, not <code>along</code>, so the texture moves
+with the panel instead of the panel sliding over a fixed picture.</p>
+<p>A door is a small state machine. Press <kbd>E</kbd> facing it and it starts
+<em>opening</em>. Once fully <em>open</em> it waits 4.3 seconds, then starts <em>closing</em>, unless
+something is standing in the doorway, in which case it opens again. For movement, a door cell is
+solid unless the door is fully open.</p>
+<pre><code>if (d.state === 'opening') {
+  d.open = Math.min(1, d.open + dt / DOOR_OPEN_TIME);
+  if (d.open === 1) { d.state = 'open'; d.timer = DOOR_STAY_OPEN; }
+} else if (d.state === 'open') {
+  d.timer -= dt;
+  if (d.timer &lt;= 0) d.state = 'closing';
+} else if (d.state === 'closing') {
+  if (isOccupied(d.x, d.y)) { d.state = 'opening'; continue; }   // something's in the way
+  d.open = Math.max(0, d.open - dt / DOOR_OPEN_TIME);
+  if (d.open === 0) d.state = 'closed';
+}</code></pre>
+<p>“Using” is deliberately simple, as in Wolfenstein: take the direction you face, round it to north,
+east, south or west, and act on the cell right next to yours in that direction. No ray needed, and it
+works on open doors too (using an open door closes it).</p>
+
+<h2>Push-walls</h2>
+<p>A push-wall is a secret: it looks exactly like the walls around it (in the map it's a lowercase
+<code>a</code>–<code>c</code> instead of <code>1</code>–<code>3</code>). Use it and it slides two cells
+away from you, opening a passage.</p>
+<p>While it moves, its front face is a line <code>offset</code> of the way into its cell, so the
+renderer needs exactly the door test with a different line: <code>x = mapX + offset</code> for a wall
+moving east. The cell ahead, which the block is sliding into, is marked as an ordinary wall in the
+meantime. When <code>offset</code> reaches 1 the block has moved a whole cell: the cell behind it
+becomes floor, and it continues from the next one.</p>
+<p>We only ever draw the block's <em>front</em> face. That works because a secret passage is exactly
+one cell wide: the block's sides slide along the passage walls, so you can never see them. Only one
+push-wall can move at a time, which keeps the bookkeeping to a single object.</p>
+
+<figure class="demo">
+  <div class="game" id="g-game">
+    <canvas class="view pixels" id="g-view" width="320" height="200"></canvas>
+    <canvas class="minimap" id="g-map" width="240" height="240"></canvas>
+  </div>
+  <div class="controls">
+    <label><input type="checkbox" id="g-frames" checked> door-frame texture</label>
+    <label><input type="checkbox" id="g-slow"> slow motion (doors and push-walls)</label>
+  </div>
+  <div class="readout" id="d-readout"></div>
+  <figcaption>Click the view, move with <kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd>,
+  <kbd>A</kbd> <kbd>D</kbd>, <kbd>Shift</kbd>, and press <kbd>E</kbd> to open a door. On the minimap,
+  doors are the lines across the middle of their cells. The readout follows the ray through the centre
+  of the view, and the door in front of you.</figcaption>
+</figure>
+
+<div class="try">
+<ul>
+  <li>Stand in a doorway and wait. The door won't close while you're in it.</li>
+  <li>Look through a half-open door in slow motion. One column hits the panel at the door's depth, the
+  next one goes through the gap and hits a wall far away. Sprites in the next room show only through
+  the gap, because the depth buffer now holds the door's depth.</li>
+  <li>Turn off the door-frame texture: the doorway turns into a hole in a brick wall.</li>
+  <li>There is a secret in the small blue room on the left (through the door in the south wall of
+  the room you start in). Look for a wall that isn't what it seems, and press <kbd>E</kbd>.</li>
+</ul>
+</div>
+
+<aside class="retro">
+<h3>Door tiles, half-steps and pwallpos</h3>
+<p>In Wolfenstein's tile map, a door tile has its top bit set (<code>0x80</code>), and the other bits
+say which door it is. Each door has a state (<code>dr_open</code>, <code>dr_closed</code>,
+<code>dr_opening</code>, <code>dr_closing</code>) and a position in <code>doorposition[]</code>, a
+16-bit number from 0 (shut) to 0xFFFF (open).</p>
+<p>When the ray-casting loop in <code>AsmRefresh</code> runs into a door tile, it adds half of its
+usual step to reach the middle of the tile, checks that the intercept is still inside the tile, and
+compares it with the door's position to decide between door and gap. That's our
+<code>crossInCell</code>, in fixed point. The door then waits <code>OPENTICS</code>, 300 tics of the
+70 Hz clock (about 4.3 seconds), before it tries to close. Walls next to a door are drawn with a
+dedicated door-side texture.</p>
+<p>Push-walls work the same way. There's only ever one moving push-wall, kept in a handful of global
+variables (<code>pwallstate</code>, <code>pwallx</code>, <code>pwally</code>, <code>pwalldir</code>,
+<code>pwallpos</code>), and the renderer offsets its intercept by <code>pwallpos</code> just as we use
+<code>offset</code>. It slides two tiles and stops, or stops earlier if something is in the way.</p>
+<p>Doors also mattered for gameplay beyond movement. A closed door separates two
+<em>areas</em> of the level, and sound doesn't pass through it. That's how enemies decide whether
+they heard your gunshot, which is the next step.</p>
+</aside>
+
+<h2>Next</h2>
+<p>We can walk from room to room. The robots still just stand there and turn. Time to give them
+something to do, and give you something to do about them.</p>
+</article>
+
+<nav class="steps-nav bottom">
+  <a href="../11-sprites/index.html">← Step 11: Sprites</a>
+  <a href="../13-shooting/index.html">Step 13: Shooting and enemies →</a>
+</nav>
+
+<script src="../../common/diagram.js"></script>
+<script src="raycaster.js"></script>
+<script src="textures.js"></script>
+<script src="sprites.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>

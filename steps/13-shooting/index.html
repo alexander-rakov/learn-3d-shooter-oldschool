@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shooting and Enemies</title>
+<link rel="stylesheet" href="../../common/style.css">
+</head>
+<body>
+<nav class="steps-nav">
+  <a href="../12-doors/index.html">← Step 12: Doors and push-walls</a>
+  <a href="../../index.html">↑ Contents</a>
+  <a href="../14-hud/index.html">Step 14: HUD, weapon, pickups →</a>
+</nav>
+
+<article>
+<p class="kicker">Part 3 · Step 13</p>
+<h1>Shooting and enemies</h1>
+<p class="lede">Time to make it a game. Shooting turns out to be a ray cast you already know, aimed
+through the middle of the screen. The robots need eyes (another ray cast), ears (a flood fill), legs
+(walking from cell to cell, opening doors) and a small brain: a state machine written as a table, the
+way Wolfenstein did it.</p>
+
+<h2>Hitscan: the bullet is a ray</h2>
+<p>Wolfenstein's guns don't fire projectiles that fly through the air. A shot hits instantly, along
+the line you're looking down. Games call this <em>hitscan</em>. For us, that line is the ray through
+the centre column of the screen, and we already know what it hits: the wall at depth
+<code>zBuffer[W/2]</code>, unless a robot is in the way.</p>
+<p>For each robot, step 11's camera space gives its depth <code>v</code> and sideways offset
+<code>u</code>. It's a candidate if it's in front of us and nearer than that wall. But is the
+crosshair actually on it? The centre ray is <code>c = 0</code>, the straight-ahead ray <code>d</code>.
+It passes the robot's picture <code>u · |p|</code> cells to the side of the picture's middle, and the
+picture is one cell wide. That gives the texture column directly:</p>
+<p class="math">texX = 64 · (0.5 − u · |p|)</p>
+<p>The texture row is even simpler. Sprites are centred on the horizon and the crosshair is on the
+horizon, so the centre of the screen always looks at texture row 32, whatever the distance. A hit is
+one texel lookup:</p>
+<pre><code>for (const a of game.actors) {
+  if (!isAlive(a)) continue;
+  const { u, v } = toCameraSpace(p, a.x, a.y);
+  if (v &lt; NEAR_PLANE || v &gt;= wallDepth) continue;          // behind us, or behind the wall
+  const texX = Math.floor(TEX * (0.5 - u * planeLen));
+  if (texX &lt; 0 || texX &gt;= TEX) continue;
+  if (!actorImage(a, p).pixels[texX * TEX + TEX / 2]) continue;   // a transparent texel
+  if (!best || v &lt; best.v) best = { actor: a, v, texX };  // the nearest one takes the bullet
+}</code></pre>
+<p>So a shot between a robot's legs or past its arm really does miss. That's stricter than Wolfenstein,
+which counted anything close to the centre of the screen.</p>
+
+<h2>Dice from a table</h2>
+<p>How much damage a hit does is random. Our random numbers come from a fixed table of 256 bytes, read
+one after another, as in Wolfenstein and Doom. It's fast, and it makes the game repeatable: the same
+inputs give the same rolls.</p>
+<p>The damage rule is Wolfenstein's own. Distance is counted in whole cells, as the larger of the x and
+y differences:</p>
+<pre><code>if (dist &lt; 2)      damage = rnd() / 4;              // point blank: 0 … 63
+else if (dist &lt; 4) damage = rnd() / 6;              // 0 … 42
+else if (rnd() / 12 &lt; dist) missed;                 // far away: the farther, the likelier to miss
+else               damage = rnd() / 6;</code></pre>
+<p>A robot has 25 hit points, so up close one shot usually does it, and from across a room it takes
+two or three, plus the misses.</p>
+
+<h2>Eyes: line of sight</h2>
+<p>Can a robot see you? Draw a line from it to you and check nothing solid is in the way. That's a ray
+cast, and <code>castRay</code> already handles walls and doors. The trick is the direction: cast from
+the robot with direction <code>b − a</code>, the vector from robot to player, not a unit vector.
+Measured along that vector, <code>t = 1</code> is exactly where you stand, so</p>
+<pre><code>function canSee(map, ax, ay, bx, by) {
+  return castRay(map, ax, ay, bx - ax, by - ay).t &gt;= 1;   // the first wall is beyond b
+}</code></pre>
+<p>A closed door blocks the line and a half-open one only through its gap, because castRay already
+knows about doors. A robot that's standing guard also only looks ahead. You must be in front of it,
+which is the sign of a dot product, as in step 1: <code>(you − robot) · facing &gt; 0</code>. Sneak up
+from behind and it won't notice you, until you make a noise.</p>
+<p>Once it notices you, it doesn't react instantly: a random reaction time of 0.15–0.65 seconds is
+your window to shoot first.</p>
+
+<h2>Ears: sound goes through open doors</h2>
+<p>When you fire, every robot that could hear it wakes up. Sound travels across open floor and through
+doors that aren't fully shut, but not through walls or closed doors. Finding everywhere it reaches is a
+<em>flood fill</em>, the paint bucket of a paint program: start at the player's cell, and keep spreading
+to neighbouring cells that are floor or open doors.</p>
+<pre><code>const stack = [start];
+while (stack.length) {
+  const i = stack.pop();
+  for (const n of [i - 1, i + 1, i - map.w, i + map.w]) {   // left, right, up, down
+    if (reached[n]) continue;
+    const cell = map.cells[n];
+    if (cell === 0 || (cell === DOOR &amp;&amp; map.doors.get(n).open &gt; 0)) {
+      reached[n] = 1;
+      stack.push(n);
+    }
+  }
+}</code></pre>
+<p>Every robot standing in a reached cell has heard you. That's why opening a door is the dangerous
+moment in Wolfenstein: fight with the doors shut and the next room stays asleep.</p>
+
+<h2>Legs: walking from cell to cell</h2>
+<p>A chasing robot walks from the centre of one cell to the centre of a neighbouring one, and only
+decides where to go next when it arrives. To choose, it scores the 8 directions by how directly they
+point at the player (the dot product again) and takes the best one that's free. Free means: no wall
+or blocking object, no other robot standing there or walking there, not the player's cell, and no
+cutting diagonally past a corner. Turning straight back is the last resort, so a robot doesn't dither
+between two cells.</p>
+<p>A door counts as free: the robot opens it and waits until it's fully open. And because a robot
+heading into a door cell counts as “occupying” it, the door won't close on it. That's the same
+<code>isOccupied</code> hook step 12 used for the player.</p>
+<p>This isn't real path finding. A robot on the far side of a long wall will happily walk into it
+forever. Wolfenstein's guards are no smarter, and somehow it still works.</p>
+
+<h2>A brain: the state machine as a table</h2>
+<p>A robot is always in one of a few <em>states</em>. Each state says which picture to show, how long it
+lasts, what to do every frame (<code>think</code>), what to do once on entering
+(<code>action</code>), and which state comes next. The robot's whole behaviour is this table plus the
+functions it names:</p>
+<pre><code>const ROBOT_STATES = {
+  stand: { frame: 'stand', think: thinkStand },
+  chase: { frame: 'walk',  think: thinkChase },
+  aim:   { frame: 'aim',   time: 0.35, think: faceThePlayer, next: 'shoot' },
+  shoot: { frame: 'shoot', time: 0.15, action: robotShoots, next: 'aim2' },
+  aim2:  { frame: 'aim',   time: 0.3,  next: 'chase' },
+  pain:  { frame: 'pain',  time: 0.3,  next: 'chase' },
+  die1:  { frame: 'die1',  time: 0.12, next: 'die2' },
+  die2:  { frame: 'die2',  time: 0.12, next: 'die3' },
+  die3:  { frame: 'die3',  time: 0.16, next: 'dead' },
+  dead:  { frame: 'dead' },
+};</code></pre>
+<pre><code>          sees or hears you                a clear shot, by chance
+  stand ─────────────────────▶ chase ─────────────────────────▶ aim ─▶ shoot ─▶ aim2 ─┐
+                                 ▲                                                     │
+                                 └─────────────────────────────────────────────────────┘
+  any state ── hit ──▶ pain ──▶ chase          hp ≤ 0 ──▶ die1 ─▶ die2 ─▶ die3 ─▶ dead</code></pre>
+<p>Running it is a few lines: call <code>think</code>, and when the state's time is up, switch to
+<code>next</code> and run its <code>action</code>. Adding a new kind of enemy, or a new trick for this one,
+means adding rows rather than rewriting logic.</p>
+<p>While chasing with a clear line to you, a robot has a small chance every frame to stop and shoot,
+larger when it's closer. The shot itself follows Wolfenstein's rule for enemy fire: a hit chance out
+of 256 of <code>160 − 8 · dist</code>, or <code>160 − 16 · dist</code> if you're running, then a damage
+roll of <code>rnd()/8</code>, <code>/16</code> or <code>/32</code> depending on distance. (That's half
+of Wolfenstein's damage, to keep the demo forgiving.)</p>
+<p>The pictures follow the state. Standing and walking use step 11's 8 rotations. Aiming, shooting,
+pain and dying use a single front-facing picture each, because in those states the robot has turned
+to face you anyway.</p>
+
+<figure class="demo">
+  <div class="game" id="g-game">
+    <canvas class="view pixels" id="g-view" width="320" height="200"></canvas>
+    <canvas class="minimap" id="g-map" width="240" height="240"></canvas>
+  </div>
+  <div class="controls">
+    <label><input type="checkbox" id="g-hear" checked> robots hear gunshots</label>
+    <label><input type="checkbox" id="g-sight" checked> show sight lines and sound</label>
+    <label><input type="checkbox" id="g-god"> you can't be hurt</label>
+  </div>
+  <div class="readout" id="c-readout"></div>
+  <figcaption>Click the view, move as before, <kbd>Space</kbd> to fire, <kbd>E</kbd> to open doors,
+  <kbd>R</kbd> to restart. On the minimap, robots are coloured by state (pink standing, red chasing,
+  orange aiming, white in pain) with numbers matching the log, dashed lines show who can see you, and
+  the blue flood after a shot shows where it was heard.</figcaption>
+</figure>
+
+<div class="try">
+<ul>
+  <li>Robot 1 faces the first door. Open it and wait a moment: you'll see its reaction time in the
+  log before it starts moving.</li>
+  <li>Fire with all doors closed, then with one open, and watch how far the blue flood spreads.
+  Robots outside it keep standing.</li>
+  <li>Aim between a robot's legs or just past its arm. The log says “nothing under the crosshair”.</li>
+  <li>Hold <kbd>Shift</kbd> while robots shoot at you: running lowers their hit chance, which the log
+  shows as a smaller number to beat.</li>
+  <li>Stand still in a doorway. Robots will open doors to get to you.</li>
+</ul>
+</div>
+
+<aside class="retro">
+<h3>statetype, ears made of areas, and a table of random numbers</h3>
+<p>Wolfenstein's enemies are driven by exactly this kind of table. Each state is a
+<code>statetype</code> record: a <code>rotate</code> flag (does this picture come in 8 directions?), the
+picture number, a duration in tics (1/70 s), a <code>think</code> function, an <code>action</code>
+function and a pointer to the next state. A guard has a few dozen of them (<code>s_grdstand</code>,
+<code>s_grdchase1</code>, …), linked into the same loops as our table.</p>
+<p>Random numbers come from <code>US_RndT()</code>, which steps through a fixed 256-byte table. Doom
+kept the idea (<code>P_Random</code> in <code>m_random.c</code>), and it's what makes Doom's recorded
+demos work: replay the same key presses and the same “random” rolls follow.</p>
+<p>Shooting (<code>GunAttack</code>) picks the closest visible enemy within a few pixels of the screen
+centre, checks the line of sight with <code>CheckLine</code>, which walks the tile map, and rolls the
+damage exactly as above. Enemies shoot back in <code>T_Shoot</code> with a hit chance that falls with
+distance and with how fast you're moving.</p>
+<p>Hearing works by <em>areas</em>. The level designer paints every floor tile with an area number, and
+doors sit between areas. The game keeps a matrix of how many open doors join each pair of areas. When
+you fire, it sets <code>madenoise</code>, and any guard in an area connected to yours wakes up. It's
+our flood fill, worked out in advance. Some guards were placed in “ambush” mode: they ignore sounds
+and wait until they see you.</p>
+<p>Chasing is tile-to-tile too. <code>SelectChaseDir</code> tries the diagonal towards the player
+first, then the two straight directions, then the old direction, then random ones, and only turns
+straight back if nothing else works. An occupancy grid (<code>actorat</code>) keeps two actors out of
+one tile.</p>
+</aside>
+
+<h2>Next</h2>
+<p>It plays, but it doesn't look like a game yet: no gun on screen, no status bar, nothing to pick up
+and nowhere to go. The last step of Part 3 adds those and puts it all in a small level you can
+finish.</p>
+</article>
+
+<nav class="steps-nav bottom">
+  <a href="../12-doors/index.html">← Step 12: Doors and push-walls</a>
+  <a href="../14-hud/index.html">Step 14: HUD, weapon, pickups →</a>
+</nav>
+
+<script src="../../common/diagram.js"></script>
+<script src="raycaster.js"></script>
+<script src="textures.js"></script>
+<script src="sprites.js"></script>
+<script src="game.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>

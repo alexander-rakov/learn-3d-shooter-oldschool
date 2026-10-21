@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HUD, Weapon and Pickups</title>
+<link rel="stylesheet" href="../../common/style.css">
+</head>
+<body>
+<nav class="steps-nav">
+  <a href="../13-shooting/index.html">← Step 13: Shooting and enemies</a>
+  <a href="../../index.html">↑ Contents</a>
+  <span class="planned">Step 15: From grids to polygons</span>
+</nav>
+
+<article>
+<p class="kicker">Part 3 · Step 14</p>
+<h1>HUD, weapon and pickups: a floor you can finish</h1>
+<p class="lede">The engine is done; this step is about everything drawn <em>on</em> the screen rather
+than in the world: a status bar, a gun in your hand, flashes when you get hurt or pick something up.
+Add things to pick up, a key, a locked door and an exit, and it's a game. The demo at the bottom is
+one complete floor.</p>
+
+<h2>Making room for a status bar</h2>
+<p>The framebuffer is still 320 × 200, but the 3D view now gets only the top 160 rows; the bottom 40
+are the status bar. The renderer doesn't need to know. Pixels are stored row after row, so the first
+160 rows are simply the first <code>320 × 160</code> entries of the array, and a typed array can give
+us a view of them without copying anything:</p>
+<pre><code>function subScreen(screen, h) {
+  return { w: screen.w, h, pixels: screen.pixels.subarray(0, screen.w * h), present() {} };
+}
+const view = subScreen(screen, 160);
+renderFrame(view, map, player, …);   // h = 160: the horizon moves up to row 80</code></pre>
+<p>After the world is drawn into <code>view</code>, everything else is painted on top in order: the
+weapon, any flash, text, the status bar. Then the whole framebuffer goes to the canvas in one
+<code>putImageData</code>.</p>
+
+<h2>Text without a font file</h2>
+<p>The status bar needs letters and digits. A 5 × 7 pixel font is small enough to write by hand: each
+glyph is 7 rows of 5 bits, and each row is a number. Here's the zero:</p>
+<pre><code>'0': '0e11131519110e'      0e  .###.
+                           11  #...#
+                           13  #..##       bit 4 (0x10) is the leftmost pixel,
+                           15  #.#.#       bit 0 the rightmost
+                           19  ##..#
+                           11  #...#
+                           0e  .###.</code></pre>
+<p>Drawing a character tests each bit and fills a <code>scale × scale</code> block where it's set. The
+status bar uses scale 1 for labels and scale 2 for the big amber numbers. A second pass in black,
+offset by one block, gives every letter a drop shadow. 46 glyphs cover everything the game ever
+says.</p>
+
+<h2>A weapon in your hand</h2>
+<p>The gun is a sprite, but not a sprite <em>in the world</em>. It doesn't have a position or a depth,
+and the camera transform doesn't apply: it's pasted flat onto the bottom centre of the view at a fixed
+size, after everything else, so nothing can cover it. The drawing loop is the sprite column loop from
+step 11 with the camera taken out: step through the texels, skip transparent ones.</p>
+<p>Two touches make it feel alive. Firing shows three pictures in quick succession: the muzzle flash,
+then the gun kicked down by the recoil, then easing back. And walking makes it sway. A <em>bob
+phase</em> grows with the distance you walk, and the gun's offset is</p>
+<p class="math">x = 7 · cos(bob) &nbsp;&nbsp;&nbsp; y = 6 · |sin(bob)|</p>
+<p>The <code>|sin|</code> bounces once per step while the <code>cos</code> swings left and right once per
+two steps, so the gun traces a small arc, like a hand moving with your stride. Stand still and it
+stops, because the phase only changes when you move.</p>
+
+<h2>Flashes</h2>
+<p>Getting hit flashes the view red; picking something up flashes it gold. Each pixel is blended
+towards the flash colour by an amount <code>a</code> that fades back to zero over a fraction of a
+second:</p>
+<p class="math">c′ = c + (target − c) · a &nbsp;&nbsp; for each of red, green and blue</p>
+<p>That's 51,200 pixels times three channels, a few times per second. Easy for us. Step 9's 1992 box
+explains why Wolfenstein didn't have to do any of it.</p>
+
+<h2>Pickups, keys and the exit</h2>
+<p>Pickups are sprites that don't block you. Each frame, any pickup within half a cell of you is
+taken, if it's any use: a medkit stays on the floor while your health is full, and so does ammo while
+you're carrying the maximum. What each one does is a small table, in the same spirit as step 13's
+state table:</p>
+<pre><code>const PICKUPS = {
+  medkit: { text: 'MEDKIT', sound: 'pickup', take(g) { if (g.health &gt;= 100) return false; g.health += 25; … } },
+  ammo:   { text: 'AMMO BOX', sound: 'pickup', take(g) { … g.ammo += 8 … } },
+  clip:   { text: 'AMMO CLIP', … },                       // dropped by robots when destroyed
+  coins:  { text: 'GOLD COINS', treasure: true, take(g) { g.score += 100; return true; } },
+  gem:    { text: 'A GEM!', treasure: true, … },
+  key:    { text: 'THE GOLD KEY', take(g) { g.hasKey = true; return true; } },
+};</code></pre>
+<p>Locked doors are doors with a flag (<code>I</code> and <code>=</code> in the map, drawn with gold bands
+and a keyhole). <code>useAction</code> takes a <code>canOpen(door)</code> callback; the game answers “only
+with the key”. Robots treat locked doors as walls.</p>
+<p>The exit is a wall, texture 9, a switch in a hazard-striped frame. Using it flips it to its “on”
+picture and ends the floor with Wolfenstein-style percentages: robots destroyed, secrets found and
+treasure collected.</p>
+
+<h2>Extras</h2>
+<h3>Sound, from scratch</h3>
+<p>No sound files either. The browser's Web Audio API can make sound from oscillators (a sine, square
+or sawtooth wave at a frequency you choose) and from noise, run through a filter. Every effect is one
+or two of those with a quick fade-out:</p>
+<pre><code>shoot: () =&gt; { noise(0.2, 4000, 250, 0.8); tone('sine', 150, 45, 0.16, 0.7); },
+                 // a hiss falling from 4 kHz to 250 Hz, plus a low thump falling 150 → 45 Hz
+alert: () =&gt; notes('square', [880, 660], 0.08, 0.08, 0.18),   // two beeps</code></pre>
+<p>Sounds made by robots get quieter with distance: volume <code>1 / (1 + 0.25·d)</code>.</p>
+
+<h3>An automap for free</h3>
+<p>Press <kbd>M</kbd> for a map of everywhere you've <em>seen</em>. Rendering already visits every cell
+the rays pass through, so <code>castRay</code> marks them in a <code>seen</code> array as it goes. That's
+step 11's <code>spotvis</code>, kept for the whole level instead of cleared each frame. The map draws
+seen cells from above, and what you haven't looked at stays black.</p>
+
+<h3>Mouse look</h3>
+<p>Tick “mouse look” and click the view: the browser's <em>pointer lock</em> hides the cursor and
+reports raw mouse movement. Each pixel of sideways movement turns you by 0.004 radians with the same
+<code>rotatePlayer</code> the arrow keys use, and the mouse button fires. <kbd>Esc</kbd> gives the
+pointer back.</p>
+
+<h3>Light falloff</h3>
+<p>Tick “light falloff” and far things get darker: each colour is scaled by
+<code>k = max(0.15, 1 − depth/14)</code>. It's cheap for the same reason everything else in this engine
+is cheap: depth is constant along a wall column, along a floor row, and across a sprite. So
+<code>k</code> is computed once per column, per row or per sprite, never per pixel. This is the idea
+behind Doom's lighting, which Part 4 will look at.</p>
+
+<figure class="demo">
+  <div class="game" id="g-game">
+    <canvas class="view pixels" id="g-view" width="320" height="200"></canvas>
+  </div>
+  <div class="controls">
+    <label><input type="checkbox" id="g-sound" checked> sound</label>
+    <label><input type="checkbox" id="g-fog"> light falloff</label>
+    <label><input type="checkbox" id="g-mouse"> mouse look (click the view; <kbd>Esc</kbd> to release)</label>
+  </div>
+  <div class="readout" id="h-readout"></div>
+  <figcaption>Click the view to play. <kbd>↑</kbd> <kbd>↓</kbd> / <kbd>W</kbd> <kbd>S</kbd> move,
+  <kbd>←</kbd> <kbd>→</kbd> turn, <kbd>A</kbd> <kbd>D</kbd> strafe, <kbd>Shift</kbd> run,
+  <kbd>Space</kbd> fire, <kbd>E</kbd> open doors and use switches, <kbd>M</kbd> map, <kbd>R</kbd> restart.
+  Find the gold key, get through the locked door in the north, and flip the exit switch. There's one
+  secret.</figcaption>
+</figure>
+
+<div class="try">
+<ul>
+  <li>Walk and watch the gun: it swings in an arc with your steps and stops when you stop.</li>
+  <li>Try the locked door before you have the key, then again after.</li>
+  <li>Turn on light falloff and look down the hall. Then look at the readout's frame time: the whole
+  frame, with everything on this page, typically takes a millisecond or two.</li>
+  <li>Open the map early, then again after exploring. Rooms appear only once you've looked into them.</li>
+  <li>For 100% secrets: one wall in the west room isn't a wall.</li>
+</ul>
+</div>
+
+<aside class="retro">
+<h3>A face in the status bar, and palette tricks</h3>
+<p>Wolfenstein's status bar shows the floor, score, lives, health, ammo, keys and weapon, plus the
+most famous part: the hero's face, which looks around, gets bloodier as health drops, and grins when
+you pick up a new gun. The bar is only redrawn when a number changes, which matters when every
+screen write goes over a slow bus to video memory.</p>
+<p>The weapon is drawn last, at a fixed size, by a simple scaler that ignores the depth buffer, just
+like ours. It doesn't bob: in Wolfenstein the gun stays still while you walk. Doom made it
+sway.</p>
+<p>The red and gold flashes are palette tricks, as step 9 mentioned. Instead of touching any pixels,
+the game reprograms the VGA's 256 palette entries for a few frames, and the whole screen changes colour
+at once, for free.</p>
+<p>Items are picked up when you enter their tile (<code>GetBonus</code>), and a medkit or food is left
+alone at full health, which our <code>take</code> returning <code>false</code> copies. The end-of-floor
+screen tallies kill, secret and treasure ratios against a par time, with a bonus for each 100%.</p>
+<p>Sound came from the AdLib or Sound Blaster card: short digitized samples for gunshots and
+shouts, synthesized FM music, and PC speaker beeps as a fallback. Our oscillators sit somewhere between
+the PC speaker and FM synthesis.</p>
+</aside>
+
+<h2>What we have, and what's next</h2>
+<p>That's Part 3, and with it a complete, if small, Wolfenstein-style game: ray-cast walls with
+textures, floors and ceilings, sprites with 8 directions, doors and secret walls, enemies that see, hear
+and chase, hitscan shooting, pickups, a status bar, sound and an automap. Every texture, sprite, letter
+and sound is generated by the code you can read in these files.</p>
+<p>The grid has served us well, but it's also the limit: every wall is axis-aligned, every room is the
+same height, and the floor is always flat. A year after Wolfenstein, Doom threw the grid away. Part 4
+looks at how: polygons instead of cells, walls at any angle, floors at any height, and a BSP tree to
+draw them in the right order.</p>
+</article>
+
+<nav class="steps-nav bottom">
+  <a href="../13-shooting/index.html">← Step 13: Shooting and enemies</a>
+  <a href="../../index.html">↑ Contents</a>
+</nav>
+
+<script src="../../common/diagram.js"></script>
+<script src="raycaster.js"></script>
+<script src="textures.js"></script>
+<script src="sprites.js"></script>
+<script src="game.js"></script>
+<script src="hud.js"></script>
+<script src="audio.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>

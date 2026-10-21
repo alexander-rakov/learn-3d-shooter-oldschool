@@ -41,30 +41,17 @@ original games.
 | 9 | Textured walls | procedural embossed bricks, u from wallX (+ flip), v by stepping | VSWAP, light/dark texture pairs, palette flashes |
 | 10 | Floor and ceiling | rowDist, camera matrix forwards, per-row stepping | Wolf3D flat colours, Doom's spans |
 
-## Part 3: Making it a game (next session)
+## Part 3: Making it a game ✅
 
-11. **Sprites** — static objects (barrels, lamps) and enemies as camera-facing
-    billboards. Transform each sprite into camera space with `M⁻¹` (step 3), project
-    with `u/v`, scale by `1/v`. Keep a per-column depth buffer from the wall pass
-    and skip sprite columns that are behind a wall. Sort far-to-near (painter's
-    algorithm). Transparent texels.
-    *1992:* Wolf3D sprites as column "posts" with transparency runs; 8 rotation
-    frames for enemies chosen by viewing angle; `wallheight[]` used as the depth buffer.
-12. **Doors and push-walls** — doors as thin walls in the middle of a cell, with
-    a sliding offset that shifts `wallX`; door-frame textures on the side walls.
-    Push-walls: a wall block that moves one cell over time.
-    *1992:* how `AsmRefresh` handled door tiles, door states and timers; secret
-    push-walls and the famous bugs around them.
-13. **Shooting and enemies** — hitscan is "cast one ray from the screen centre
-    and compare against sprite hits"; line of sight between enemy and player via
-    DDA; a small state machine (stand → chase → attack → pain → die); damage,
-    health, ammo.
-    *1992:* Wolf3D's `statetype` tables, random damage rolls, enemies "hearing"
-    gunshots through connected areas.
-14. **HUD, weapon and pickups** — status bar, weapon sprite with bobbing,
-    damage/pickup screen flashes, a small level with a goal.
-    *Optional extras:* WebAudio sounds, an automap, mouse look via pointer lock,
-    distance fog / light falloff.
+| # | Step | Key ideas | 1992 box |
+|---|------|-----------|----------|
+| 11 | Sprites | billboards, camera space with `M⁻¹`, one-row depth buffer, painter's algorithm, transparent texels, 8 rotation frames, procedural sprites built from shaded parts | posts, `spotvis`, `wallheight[]`, `CalcRotate` |
+| 12 | Doors and push-walls | a thin wall across the middle of a cell (`crossInCell`), sliding panel and gap, door frames, door state machine, push-walls | door tiles, half-steps in `AsmRefresh`, `OPENTICS`, `pwallpos` |
+| 13 | Shooting and enemies | hitscan with a texel test, line of sight as `castRay(b − a)`, hearing as a flood fill through open doors, tile-to-tile chasing, the state machine as a table, a fixed random table | `statetype`, `US_RndT`, `GunAttack` / `T_Shoot`, areas and `madenoise`, `SelectChaseDir` |
+| 14 | HUD, weapon and pickups | `subScreen`, a 5×7 bitmap font, status bar, weapon bob, flashes, pickups table, gold key and locked doors, exit and end-of-floor ratios; extras: Web Audio sound effects, automap from seen cells, mouse look, light falloff | the status bar face, palette flashes, `GetBonus`, kill/secret/treasure ratios, AdLib and Sound Blaster |
+
+New files: `sprites.js` (from step 11), `game.js` (from step 13: robots, shooting,
+pickups, kept apart from the engine in `raycaster.js`), `hud.js` and `audio.js` (step 14).
 
 ## Part 4: How Doom did it differently (later)
 
@@ -85,7 +72,8 @@ original games.
 ## Open questions / ideas
 
 - Blog publishing: GitHub Pages straight from this repo will work as-is (no build).
-- Should Part 3 add a tiny "engine API" section so later steps can be shorter?
+- Part 3 kept the engine (`raycaster.js`) and the game (`game.js`) apart rather than adding
+  an "engine API". Part 4 replaces the grid, so it will need its own renderer anyway.
 - Possible extra step between 10 and 11: performance (typed arrays, avoiding
   allocations in the frame loop, measuring frame time), plus a fixed-point
   version of `castRay` as a 1992 experiment.
