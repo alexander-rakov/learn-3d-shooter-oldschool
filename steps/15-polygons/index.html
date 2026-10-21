@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>From Grids to Polygons</title>
+<link rel="stylesheet" href="../../common/style.css">
+</head>
+<body>
+<nav class="steps-nav">
+  <a href="../14-hud/index.html">← Step 14: HUD, weapon and pickups</a>
+  <a href="../../index.html">↑ Contents</a>
+  <a href="../16-wall-segments/index.html">Step 16: Projecting wall segments →</a>
+</nav>
+
+<article>
+<p class="kicker">Part 4 · Step 15</p>
+<h1>From grids to polygons: vertices, linedefs and sectors</h1>
+<p class="lede">Wolfenstein's world is a grid of cubes. A year later, Doom's world was a drawing: lines
+at any angle, rooms of any shape, floors and ceilings at any height. This step throws the grid away and
+describes a level the way Doom does. Then it finds out what that costs the renderer we have.</p>
+
+<h2>A level is a 2D drawing</h2>
+<p>Doom's levels are still flat in one sense: you can't have a room above another room. Seen from
+above, a level is a plan, like an architect's floor plan, and the third dimension comes from numbers
+attached to its parts. Four kinds of things make up the plan:</p>
+<ul>
+  <li><strong>Vertices</strong>: points, <code>(x, y)</code>.</li>
+  <li><strong>Linedefs</strong>: lines from one vertex to another, <code>v1 → v2</code>. Every wall is
+  a linedef, at any angle and of any length.</li>
+  <li><strong>Sectors</strong>: areas of floor enclosed by linedefs. A sector has a floor height, a
+  ceiling height and a few more properties. From step 17 on they matter; until then every floor is at
+  0 and every ceiling at 1, as in Wolfenstein.</li>
+  <li><strong>Sidedefs</strong>: a linedef has two sides, and each side that faces into a sector gets
+  a sidedef. It says which sector is on that side, and which texture to draw there.</li>
+</ul>
+<p>Which side is which? The <em>front</em> of a linedef is on the right as you walk from
+<code>v1</code> to <code>v2</code>, the direction of <code>perp(e)</code> from step 1, where
+<code>e = v2 − v1</code>. Every linedef has a front sidedef. A line with only a front side is a solid
+wall: the void is behind it. A line with sidedefs on both sides, a <em>two-sided</em> linedef, is
+the boundary between two sectors, for example a doorway from a room into a corridor. You can walk
+through it, and in step 17 it becomes a window or a step.</p>
+
+<figure class="demo">
+  <canvas id="m-map" width="640" height="520"></canvas>
+  <div class="readout" id="m-readout"></div>
+  <figcaption>Our level, as an editor would show it. Solid lines are one-sided, dashed lines are
+  two-sided. The tick in the middle of each line points to its front side. Hover a line to see its
+  vertices and sidedefs, or hover a sector to see what's in it. Notice the pillars: they are holes in a
+  sector, and their lines face outwards.</figcaption>
+</figure>
+
+<h3>Writing it down</h3>
+<p>Nobody types in linedefs and sidedefs by hand; a level editor makes them from what you draw. Ours is
+a small function, <code>buildMap</code>. We list the vertices, then outline each sector by listing its
+vertices clockwise, as seen on screen, so the sector is always on the right of each edge, the
+front:</p>
+<pre><code>buildMap({
+  vertices: [[2, 3], [6, 2], [8, 4], [8, 6], [8, 8], …],
+  sectors: [
+    { name: 'hall', wall: 1, loops: [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9], { v: [10, 11, 12, 13], wall: 3 }] },
+    { name: 'corridor', wall: 2, loops: [[3, 14, 15, 16, 17, 4]] },
+    …</code></pre>
+<p>Each edge of each outline becomes a sidedef. If the same edge turns up again in another sector's
+outline, walked the other way (the hall has <code>3 → 4</code>, the corridor <code>4 → 3</code>),
+the two sidedefs share one two-sided linedef. A pillar is a second loop going anticlockwise, which
+puts the sector on the <em>outside</em> of the pillar's edges. That is, the pillar's walls face out
+into the room and there is nothing inside.</p>
+
+<h3>Which sector am I in?</h3>
+<p>The grid answered “where am I?” with <code>Math.floor</code>. Now it takes a little thought.
+Draw a horizontal line from the point towards the east and find the nearest linedef it crosses.
+Nothing lies between the point and that linedef, so the point is in whichever sector is on its side of
+it. And which side that is, is a sign test. The 2D <em>cross product</em></p>
+<p class="math">cross(a, b) = a<sub>x</sub>·b<sub>y</sub> − a<sub>y</sub>·b<sub>x</sub> = perp(a) · b</p>
+<p>is the dot product with <code>perp(a)</code>, so it's positive when <code>b</code> points to the
+right of <code>a</code>. A point <code>q</code> is on the front of a linedef if
+<code>cross(e, q − v1) ≥ 0</code>:</p>
+<pre><code>function pointOnSide(line, x, y) {
+  return cross(line.dx, line.dy, x - line.v1.x, y - line.v1.y) &gt;= 0 ? 0 : 1;   // 0 = front
+}</code></pre>
+<p>In the demo above, the dashed blue line from the pointer is that eastward search. If the line it
+finds has no sidedef on our side, the point is in the void, or inside a pillar.</p>
+
+<h2>What happens to the renderer</h2>
+<p>The renderer from steps 5–10 casts one ray per screen column. That part still works: the camera,
+<code>d + c·p</code>, perspective, texturing, floors. What breaks is finding the wall. DDA was fast
+because walls lay exactly on grid lines, so a ray only had to check the cells it passed through, in
+order, and stop at the first wall. Walls at any angle and anywhere don't line up with anything. The
+honest answer is to test the ray against every one-sided linedef and keep the nearest hit.</p>
+
+<h3>Ray meets line</h3>
+<p>The ray is <code>pos + t·r</code>. The linedef is <code>v1 + s·e</code>, with <code>s</code> going
+from 0 at <code>v1</code> to 1 at <code>v2</code>. Where they meet,</p>
+<p class="math">pos + t·r = v1 + s·e &nbsp;&nbsp;⇒&nbsp;&nbsp; t·r − s·e = q, &nbsp;&nbsp; with q = v1 − pos</p>
+<p>That's two equations (x and y) in two unknowns. Here's a neat way to solve them. The cross product of
+any vector with itself is 0. So take the cross product of both sides with <code>e</code>, and the
+<code>s</code> term disappears. Do it with <code>r</code> instead, and the <code>t</code> term
+disappears:</p>
+<p class="math">t = cross(q, e) / cross(r, e) &nbsp;&nbsp;&nbsp;&nbsp; s = cross(q, r) / cross(r, e)</p>
+<p>If <code>cross(r, e) = 0</code> the ray and the line are parallel and never meet. Otherwise the ray
+hits the wall if <code>0 ≤ s ≤ 1</code> (between the ends) and <code>t &gt; 0</code> (in front of
+us):</p>
+<pre><code>for (const line of map.lines) {
+  if (line.back) continue;                           // two-sided: open
+  const denom = cross(rayDirX, rayDirY, line.dx, line.dy);
+  if (denom === 0) continue;
+  const qx = line.v1.x - posX, qy = line.v1.y - posY;
+  const t = cross(qx, qy, line.dx, line.dy) / denom;
+  if (t &lt;= 0 || t &gt;= nearest) continue;
+  const s = cross(qx, qy, rayDirX, rayDirY) / denom;
+  if (s &lt; 0 || s &gt; 1) continue;
+  nearest = t;
+  hit = { t, s, line };
+}</code></pre>
+<p>Good news from step 7: <code>r = d + c·p</code> again, so <code>t</code> is still the depth,
+with no fisheye correction needed. The rest of the column is drawn as before.</p>
+
+<h3>Textures along a line</h3>
+<p>A grid wall was always exactly one texture wide. A linedef can be any length, so the texture
+repeats along it: the distance from <code>v1</code> to the hit point is <code>u = s · length</code>
+map units, and the texture column is the fractional part of <code>u</code> × 64. It's the floor tile
+trick from step 10, along a line instead of across a cell.</p>
+<p>Shading changes too. Step 6 drew walls running east–west at half brightness. With walls at any
+angle, the brightness now slides with the angle, from 55% for east–west walls to 100% for north–south
+ones: <code>0.55 + 0.45 · |e<sub>y</sub>| / |e|</code>.</p>
+
+<figure class="demo">
+  <div class="game" id="g-game">
+    <canvas class="view pixels" id="g-view" width="320" height="200"></canvas>
+    <canvas class="minimap" id="g-map" width="240" height="240"></canvas>
+  </div>
+  <div class="readout" id="g-readout"></div>
+  <figcaption>The same level, rendered. Click the view to move (<kbd>↑</kbd> <kbd>↓</kbd>
+  <kbd>←</kbd> <kbd>→</kbd>, <kbd>A</kbd> <kbd>D</kbd>, <kbd>Shift</kbd>). Hover the view to pick a
+  column. On the map, its ray stops at the nearest wall (yellow); the red rings are the other walls
+  the same ray crosses. They were all tested, and all thrown away.</figcaption>
+</figure>
+
+<div class="try">
+<ul>
+  <li>Walk up to a diagonal wall and look along it. It's straight, at any angle: depth is still
+  depth.</li>
+  <li>Look at the round pillar from close by. It's 8 short linedefs, and the shading changes from
+  face to face.</li>
+  <li>Count the cost in the readout: every column tests every linedef. DDA visited about as many cells
+  as there were between you and the wall, often fewer than ten.</li>
+</ul>
+</div>
+
+<h2>Collision against lines</h2>
+<p>The player used to be a box, tested against grid cells. Now the player is a circle of radius 0.25,
+and a wall is a segment. The point of a segment nearest to the player's centre is step 1's projection,
+clamped to the ends of the segment:</p>
+<p class="math">s = clamp((pos − v1) · e / |e|², 0, 1) &nbsp;&nbsp;&nbsp; nearest = v1 + s·e</p>
+<p>If that point is closer than the radius, the player overlaps the wall and is pushed straight away
+from it, back to exactly the radius. Pushing out along the wall's normal undoes only the part of a move
+that went into the wall, so sliding along walls, which took extra code in step 8, comes for free.
+Clamping <code>s</code> also handles corners: there the nearest point is the corner vertex itself, and
+the player is pushed away from it in a circle, so you round corners smoothly. To keep a fast move from
+jumping straight over a line, each move is split into steps shorter than the radius.</p>
+
+<aside class="retro doom">
+<h3>WAD files and lumps</h3>
+<p>A Doom level is a set of <em>lumps</em>, named blocks of data in a WAD file: <code>VERTEXES</code>,
+<code>LINEDEFS</code>, <code>SIDEDEFS</code> and <code>SECTORS</code> are the four you've just seen,
+plus <code>THINGS</code> (where monsters and items start) and a few the editor generates for the
+engine, which the next steps get to. All coordinates are 16-bit integers in map units. A Wolfenstein
+tile was 64 of them, and the player is a circle of radius 16 and 56 units tall.</p>
+<p>A linedef is 14 bytes: its two vertex numbers, flags (such as “blocks monsters” or “two-sided”), a
+special action (a door, a lift, a switch), a tag linking it to the sectors that action moves, and its
+right and left sidedef numbers. The left one is −1 for a one-sided line. A sidedef holds three
+8-letter texture names (upper, lower and middle, for step 17), x and y texture offsets for aligning
+them, and its sector. A sector holds its floor and ceiling heights, their textures, a light level
+(step 19), and a type, for damaging floors or flickering lights.</p>
+<p>Levels were drawn in DoomEd, id's own editor, written for NeXTSTEP on the NeXT computers the game
+was developed on.</p>
+<p>Doom doesn't test the player against every linedef, either. The editor also builds a
+<code>BLOCKMAP</code>: a grid of 128 × 128-unit blocks, each with a list of the linedefs touching it.
+Collision only checks the lines in the blocks the player overlaps. The grid is back, but only for
+finding nearby lines. And to draw walls, Doom doesn't cast rays at all. That's the next step.</p>
+</aside>
+
+<h2>Next</h2>
+<p>Testing every ray against every line works, and on this small map JavaScript doesn't mind. But the
+cost grows with the size of the map. Doom's levels have hundreds of linedefs, and only a handful are
+in view at any time. Doom turned the loop inside out: instead of asking, for every column, which wall
+it sees, it asks, for every wall, which columns it covers.</p>
+</article>
+
+<nav class="steps-nav bottom">
+  <a href="../14-hud/index.html">← Step 14: HUD, weapon and pickups</a>
+  <a href="../16-wall-segments/index.html">Step 16: Projecting wall segments →</a>
+</nav>
+
+<script src="../../common/diagram.js"></script>
+<script src="level.js"></script>
+<script src="renderer.js"></script>
+<script src="textures.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>

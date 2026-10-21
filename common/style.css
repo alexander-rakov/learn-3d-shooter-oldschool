@@ -130,6 +130,7 @@ aside.retro::before {
   color: var(--retro-edge);
   margin: 0.7rem 0 0.2rem;
 }
+aside.retro.doom::before { content: "How Doom did it in 1993"; }
 aside.retro h3 { margin-top: 0.6rem; }
 
 aside.note {
