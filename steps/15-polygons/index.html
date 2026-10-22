@@ -79,8 +79,28 @@ right of <code>a</code>. A point <code>q</code> is on the front of a linedef if
 <pre><code>function pointOnSide(line, x, y) {
   return cross(line.dx, line.dy, x - line.v1.x, y - line.v1.y) &gt;= 0 ? 0 : 1;   // 0 = front
 }</code></pre>
-<p>In the demo above, the dashed blue line from the pointer is that eastward search. If the line it
-finds has no sidedef on our side, the point is in the void, or inside a pillar.</p>
+<figure class="demo">
+  <canvas id="x-canvas" width="480" height="300"></canvas>
+  <div class="readout" id="x-readout"></div>
+  <figcaption>One linedef from <span style="color:#ffd166">v1</span> to <span style="color:#ffd166">v2</span>,
+  and a point <span style="color:#4cc9f0">q</span>. Drag all three. The shaded half of the plane is the
+  front, the side <code style="color:#06d6a0">perp(e)</code> points to. The cross product is
+  <code>|e|</code> times q's signed distance from the line (dashed): it changes sign exactly as q
+  crosses the line, and is 0 on it.</figcaption>
+</figure>
+
+<div class="try">
+<ul>
+  <li>Drag q across the line and watch the sign flip from front to back.</li>
+  <li>Slide q parallel to the line: the cross product doesn't change, because only the distance
+  from the line counts.</li>
+  <li>Swap v1 and v2 (drag them past each other): the front moves to the other side. That's why the
+  direction of a linedef matters.</li>
+</ul>
+</div>
+
+<p>In the map demo at the top, the dashed blue line from the pointer is that eastward search. If the
+line it finds has no sidedef on our side, the point is in the void, or inside a pillar.</p>
 
 <h2>What happens to the renderer</h2>
 <p>The renderer from steps 5–10 casts one ray per screen column. That part still works: the camera,

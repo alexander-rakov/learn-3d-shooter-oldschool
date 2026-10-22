@@ -141,6 +141,65 @@ function describeSide(side) {
   draw();
 })();
 
+// ------------------------------------------------------------ the cross product, one line and one point
+
+(function crossDemo() {
+  const { canvas, ctx, w, h } = setupCanvas(document.getElementById('x-canvas'));
+  const view = makeView(40, w / 2, h / 2);   // 40 px per unit, origin in the middle, y down
+  const readout = document.getElementById('x-readout');
+  const v1 = { x: -3.5, y: 1.5 }, v2 = { x: 3, y: -1.5 }, q = { x: 0.5, y: 2 };
+  enableDrag(canvas, view, [v1, v2, q]);
+
+  function draw() {
+    clear(ctx, w, h);
+    drawGrid(ctx, view, w, h);
+    const ex = v2.x - v1.x, ey = v2.y - v1.y, len = Math.hypot(ex, ey) || 1e-9;
+    const ux = ex / len, uy = ey / len;            // along the line
+    const nx = -uy, ny = ux;                       // perp(e) / |e|: towards the front
+    const qx = q.x - v1.x, qy = q.y - v1.y;
+    const c = cross(ex, ey, qx, qy);
+    const dist = c / len;                          // signed distance from the line
+
+    // The front half-plane: a big quad on the perp(e) side of the line.
+    const far = 40;
+    ctx.beginPath();
+    [[-far, 0], [far, 0], [far, far], [-far, far]].forEach(([a, b], i) => {
+      const x = view.sx(v1.x + ux * a + nx * b), y = view.sy(v1.y + uy * a + ny * b);
+      if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+    });
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(6,214,160,0.10)';
+    ctx.fill();
+    line(ctx, view.sx(v1.x - ux * far), view.sy(v1.y - uy * far), view.sx(v1.x + ux * far), view.sy(v1.y + uy * far), C.axis, 1, [4, 4]);
+
+    // The linedef, its perp(e), and q − v1.
+    arrow(ctx, view.sx(v1.x), view.sy(v1.y), view.sx(v2.x), view.sy(v2.y), C.player, 3);
+    const mx = (v1.x + v2.x) / 2, my = (v1.y + v2.y) / 2;
+    arrow(ctx, view.sx(mx), view.sy(my), view.sx(mx + nx * 1.5), view.sy(my + ny * 1.5), C.plane, 2);
+    label(ctx, 'perp(e)', view.sx(mx + nx * 1.5) + 6, view.sy(my + ny * 1.5), C.plane);
+    arrow(ctx, view.sx(v1.x), view.sy(v1.y), view.sx(q.x), view.sy(q.y), C.ray, 2);
+    // q's distance from the line, straight along perp(e).
+    line(ctx, view.sx(q.x), view.sy(q.y), view.sx(q.x - nx * dist), view.sy(q.y - ny * dist), C.dim, 1.5, [3, 3]);
+
+    disc(ctx, view.sx(v1.x), view.sy(v1.y), 5, C.player);
+    disc(ctx, view.sx(v2.x), view.sy(v2.y), 5, C.player);
+    label(ctx, 'v1', view.sx(v1.x) + 8, view.sy(v1.y) + 12, C.player);
+    label(ctx, 'v2', view.sx(v2.x) + 8, view.sy(v2.y) - 10, C.player);
+    disc(ctx, view.sx(q.x), view.sy(q.y), 5, C.ray);
+    label(ctx, 'q', view.sx(q.x) + 8, view.sy(q.y) - 10, C.ray);
+    label(ctx, 'front', view.sx(mx + nx * 3), view.sy(my + ny * 3), C.plane, 'center');
+    label(ctx, 'back', view.sx(mx - nx * 3), view.sy(my - ny * 3), C.dim, 'center');
+
+    const side = Math.abs(c) < 1e-9 ? 'ON the line (counts as front)' : c > 0 ? 'FRONT (pointOnSide = 0)' : 'BACK (pointOnSide = 1)';
+    readout.textContent =
+      `e      = v2 − v1 = (${fmt(ex)}, ${fmt(ey)})      perp(e) = (${fmt(-ey)}, ${fmt(ex)})\n` +
+      `q − v1 = (${fmt(qx)}, ${fmt(qy)})\n` +
+      `cross(e, q − v1) = (${fmt(ex)})·(${fmt(qy)}) − (${fmt(ey)})·(${fmt(qx)}) = ${fmt(c)}   = perp(e) · (q − v1)\n` +
+      `                 = |e| × distance = ${fmt(len)} × ${fmt(dist)}     →  q is ${side}`;
+  }
+  animate(draw);
+})();
+
 // ------------------------------------------------------------ demo 2: rendering it
 
 (function renderDemo() {
