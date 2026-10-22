@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BSP Trees</title>
+<link rel="stylesheet" href="../../common/style.css">
+</head>
+<body>
+<nav class="steps-nav">
+  <a href="../17-heights/index.html">← Step 17: Variable heights</a>
+  <a href="../../index.html">↑ Contents</a>
+  <a href="../19-visplanes/index.html">Step 19: Visplanes and lighting →</a>
+</nav>
+
+<article>
+<p class="kicker">Part 4 · Step 18</p>
+<h1>BSP trees: front to back without sorting</h1>
+<p class="lede">Step 17 needed walls drawn near to far, and got that order from portals, which only
+works for convex sectors. Doom's answer is to do the sorting once, before the game even starts, and
+store the result in a binary tree. At run time, any viewpoint reads its front-to-back order straight off
+the tree, with one side test per branch.</p>
+
+<h2>One line splits the world</h2>
+<p>Pick any wall and extend it into an infinite line, a <em>partition</em>. It divides the level into
+two halves: in front of the line, and behind it. You're standing on one side of it, say in front. Here's
+the key fact: <strong>nothing behind the line can hide anything in front of it.</strong> The line of
+sight from your eye to any point on your side stays on your side (a half-plane has no dents), so
+nothing from the other side can get in its way. Things on your side, on the other hand, can certainly
+hide things on the far side.</p>
+<p>So, to draw near to far: draw everything on your side of the partition first, then everything on the
+other side. That's not a full order yet, since each half can still contain a mess. But each half can be
+split again by another partition, and so on, until the pieces are simple enough that their order
+doesn't matter. Which pieces are those? Convex ones, step 17 told us: nothing in a convex piece can hide
+anything else in it.</p>
+<p>Write the splits down as a tree. Each <em>node</em> holds a partition line and two children, the
+front half and the back half. Each leaf is a convex piece, a <em>subsector</em>, with its list of segs.
+Drawing near to far is then a short recursive walk:</p>
+<pre><code>function renderNode(node) {
+  if (node.subsector) { drawSubsector(node.subsector); return; }   // convex: any order
+  const side = pointOnSide(node, p.x, p.y);                        // 0 = we're in front
+  renderNode(node.children[side]);                                 // our side first…
+  renderNode(node.children[side ^ 1]);                             // …then the far side
+}</code></pre>
+<p>Notice what <em>doesn't</em> happen at run time: no sorting, no distances, no comparisons between
+walls. The order changes as you move, because which child goes first at each node depends on where you
+stand, but the tree itself never changes.</p>
+
+<h2>Building the tree</h2>
+<p>The <em>node builder</em> starts with every seg of every sector, then:</p>
+<ol>
+  <li>If the segs form a convex set (every seg is in front of every other seg's line), stop: this is a
+  subsector.</li>
+  <li>Otherwise choose a seg, and use the line through it as the partition.</li>
+  <li>Sort every seg into front or back with <code>pointOnSide</code> on its two ends. A seg that lies
+  on the partition line goes front if it faces the same way, back if not.</li>
+  <li>A seg with one end on each side gets <em>split</em> in two at the crossing, with a brand-new
+  vertex there. The crossing is at fraction <code>t = a / (a − b)</code> along the seg, where
+  <code>a</code> and <code>b</code> are its ends' signed distances from the partition: the same
+  interpolation as near-plane clipping in step 16. The second piece's texture offset grows by
+  <code>t · length</code>, so its bricks still line up with the first piece's.</li>
+  <li>Build the front set and the back set the same way.</li>
+</ol>
+<p>Which seg makes a good partition? Every split adds a seg, which costs drawing time forever after,
+and a lopsided tree is deeper than it needs to be. Our builder tries every seg and scores it:</p>
+<pre><code>score = splits × 8 + |front − back|      // the lowest score wins</code></pre>
+<p>A seg with everything else on one side is skipped, because it doesn't divide anything. That can't
+happen for every seg unless the set is already convex, so the recursion always ends.</p>
+
+<figure class="demo">
+  <canvas id="t-map" width="640" height="530"></canvas>
+  <canvas id="t-tree" width="640" height="190" style="margin-top:10px"></canvas>
+  <div class="controls">
+    <label>depth <input type="range" id="t-depth" min="0" max="9" step="1" value="9"> <output for="t-depth"></output></label>
+  </div>
+  <div class="readout" id="t-readout"></div>
+  <figcaption>Step 17's level, with the courtyard as one concave sector and a pillar in the start room
+  and in the crypt, so no room is convex any more. Slide the depth from 0 to see the partitions go in,
+  level by level; each dashed line is drawn only across the region it splits. At full depth every region
+  is a subsector. The numbers are the front-to-back order from the eye: drag it around and watch them
+  change. Below, the tree itself, with front children on the left.</figcaption>
+</figure>
+
+<h2>Walking it: solid segs</h2>
+<p>Step 17's clip arrays still decide which rows of a column are open. What the BSP walk adds is a
+cheaper way to know when a whole column is <em>done</em>. When a one-sided wall is drawn over columns
+<code>a</code> to <code>b</code>, nothing behind it will ever show there, and since we're going front
+to back, everything after it is behind it. Doom keeps a sorted list of these finished column ranges,
+the <em>solid segs</em>, and clips every seg against it before drawing:</p>
+<pre><code>clipSeg(a, b, solid, draw):
+  for each gap in the list that overlaps [a, b): draw(that part)    // only the unfinished columns
+  if (solid) merge [a, b) into the list                              // and now they're finished</code></pre>
+<p>Two-sided segs are clipped against the list too, but don't add to it. Their columns stay open
+through the gap. The list starts with two sentinel ranges, everything left of column 0 and everything
+right of the last column. When it has merged down to a single range, every column is finished and the
+walk can stop immediately, however much of the tree is left. Standing in a small room in a huge level,
+that's almost all of it.</p>
+
+<h3>Skipping whole branches</h3>
+<p>The walk can do even better. The node builder stores a bounding box for each child of a node, around
+all the segs below it. Before going into the far child, the walk checks whether any of its box could be
+visible. The box's outline from above is a rectangle, so clip it to the near plane and project its
+corners (step 16 again) to get the columns it spans. If those columns are off screen, or all inside one
+finished range, nothing in that branch can show, and the walk skips it without looking at a single
+seg.</p>
+
+<h3>Finding your sector</h3>
+<p>The tree answers step 15's “which sector am I in?” too. Start at the root and take the child on your
+side of each partition until you reach a leaf. Its subsector belongs to one sector. That's one side test
+per level of the tree, about 10 here, instead of a search through every linedef.</p>
+
+<figure class="demo">
+  <div class="game" id="g-game">
+    <canvas class="view pixels" id="g-view" width="320" height="200"></canvas>
+    <canvas class="minimap" id="g-map" width="240" height="240"></canvas>
+  </div>
+  <div class="controls">
+    <label><input type="checkbox" id="g-stop" checked> stop when the screen is full</label>
+    <label><input type="checkbox" id="g-bbox" checked> skip boxes out of view</label>
+    <label>draw at most <input type="range" id="g-segs" min="0" max="40" step="1" value="40"> <output for="g-segs"></output> segs</label>
+    <button id="g-replay">replay the frame slowly</button>
+  </div>
+  <div class="readout" id="g-readout"></div>
+  <figcaption>Click the view to move. On the map, the segs drawn this frame go from yellow (first) to
+  purple (last), and the subsectors visited are shaded, darker the later they come. Press
+  <em>replay</em> to watch one frame being drawn, seg by seg: it fills in from the nearest wall outwards,
+  and black is what hasn't been reached yet. The slider stops the frame part way; at 40 it draws
+  everything.</figcaption>
+</figure>
+
+<div class="try">
+<ul>
+  <li>Replay a frame in the courtyard. The platform, which is nearest, goes in first, and the far wall
+  last, filling only what's left. Step 17's concave courtyard is no problem any more.</li>
+  <li>Stand facing a wall up close and look at the counts: a handful of subsectors and the walk stops,
+  because one wall finished every column.</li>
+  <li>Turn off “stop when the screen is full” and “skip boxes”: the picture is the same, but the walk
+  visits every node in the tree.</li>
+  <li>In the first demo, watch the red rings: the node builder had to split some segs, mostly around the
+  slanted pillar walls.</li>
+</ul>
+</div>
+
+<aside class="retro doom">
+<h3>NODES, SSECTORS and SEGS</h3>
+<p>Binary space partitioning trees were invented for 3D graphics at the start of the 1980s, by Henry
+Fuchs, Zvi Kedem and Bruce Naylor, as a way to draw polygons in a correct order from any viewpoint.
+John Carmack first used one in a game in the Super Nintendo port of Wolfenstein 3D, which needed to be
+faster than ray casting on that console, and then built Doom around it.</p>
+<p>The node builder ran when a level was saved and wrote three more lumps into the WAD:
+<code>SEGS</code> (the pieces of linedefs, each with its sidedef, direction and texture offset),
+<code>SSECTORS</code> (each subsector as a run of consecutive segs) and <code>NODES</code> (each a
+partition line as a point plus a direction, two bounding boxes, and two children; the top bit of a child
+number says “this is a subsector”).</p>
+<p>The engine's walk is <code>R_RenderBSPNode</code>, almost line for line like <code>renderNode</code>.
+Its bounding box test, <code>R_CheckBBox</code>, works with view angles rather than projected corners.
+Segs go through <code>R_ClipSolidWallSegment</code> or <code>R_ClipPassWallSegment</code>, and the list
+of finished ranges is an array called <code>solidsegs</code>, with room for only 32 ranges. That's
+plenty, because the ranges merge as the screen fills up.</p>
+<p>The tree is the reason for a famous limitation. Because it's computed in advance from the 2D map, the
+map can never change while you play. Floors and ceilings can move up and down (that changes heights,
+not lines), which is why every door in Doom is a ceiling that rises, and every lift a floor that
+lowers. But nothing can slide sideways or rotate, and no sector can be above another one.</p>
+<p>Sprites aren't in the tree either. After the walls, Doom draws the visible things far to near, as in
+step 11, cutting each one off where a nearer wall covers it, using a record of every wall it drew.</p>
+</aside>
+
+<h2>Next</h2>
+<p>Walls are now right and nothing is drawn twice. Floors and ceilings, though, are still drawn one
+pixel at a time down each column, with a division for every pixel. Doom collects them into
+<em>visplanes</em> and draws them along rows instead, which is also where its lighting comes in.</p>
+</article>
+
+<nav class="steps-nav bottom">
+  <a href="../17-heights/index.html">← Step 17: Variable heights</a>
+  <a href="../19-visplanes/index.html">Step 19: Visplanes and lighting →</a>
+</nav>
+
+<script src="../../common/diagram.js"></script>
+<script src="level.js"></script>
+<script src="bsp.js"></script>
+<script src="renderer.js"></script>
+<script src="textures.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>

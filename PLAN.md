@@ -53,27 +53,67 @@ original games.
 New files: `sprites.js` (from step 11), `game.js` (from step 13: robots, shooting,
 pickups, kept apart from the engine in `raycaster.js`), `hud.js` and `audio.js` (step 14).
 
-## Part 4: How Doom did it differently (later)
+## Part 4: How Doom did it differently ✅
 
-15. **From grids to polygons** — vertices, linedefs, sidedefs, sectors; why
-    arbitrary angles break the "one cell = one DDA step" trick.
-16. **Projecting wall segments** — transform segment endpoints into camera space
-    (same `M⁻¹`), near-plane clipping, then draw columns between the projected
-    endpoints, interpolating `1/z` (perspective-correct texturing).
-17. **Variable heights** — per-sector floor/ceiling heights, upper/lower wall
-    parts, portals between sectors, per-column top/bottom clip arrays.
-18. **BSP trees** — building one (choosing splitters, splitting lines),
-    front-to-back traversal, "solid segs" to stop when every column is filled.
-19. **Visplanes and lighting** — floors/ceilings as spans (builds on step 10),
-    sector light levels, `COLORMAP` distance fading.
-    *Aside:* Ken Silverman (Ken's Labyrinth) went on to write the Build engine
-    (Duke Nukem 3D), which uses portals instead of BSP.
+| # | Step | Key ideas | 1993 box |
+|---|------|-----------|----------|
+| 15 | From grids to polygons | vertices, linedefs, sidedefs, sectors built from sector outlines, front = right of v1 → v2, `sectorAt`, the 2D cross product, ray vs. every linedef, textures along a line, circle vs. segment collision | WAD lumps, `BLOCKMAP` |
+| 16 | Projecting wall segments | endpoints into camera space (`M⁻¹`), back-face culling, near-plane clipping, 1/z and along/z linear in screen x (perspective-correct vs. affine), one-row depth buffer | `R_AddLine` angles, `rw_scalestep`, why Doom never divides per pixel |
+| 17 | Variable heights | per-sector floor/ceiling, segs, upper/lower walls, clip arrays (`top`/`bottom`), floors per column, portal rendering (needs convex sectors), step height and headroom | `ceilingclip`/`floorclip`, pegging, the Build engine's portals |
+| 18 | BSP trees | partitions, node builder (choose, split with texture offsets, convex subsectors), front-to-back walk, solid segs, bounding boxes, `subsectorAt` | `NODES`/`SSECTORS`/`SEGS`, `R_RenderBSPNode`, why the map can't move sideways |
+| 19 | Visplanes and lighting | visplanes (`findPlane`, `checkPlane`), columns to spans (`makeSpans`), spans as step 10 rows, median-cut palette, COLORMAP, Doom's light formula, fake contrast, the sky | `MAXVISPLANES`, `COLORMAP`/`PLAYPAL`, light specials |
+
+Part 4 has its own engine: `level.js` (the map), `renderer.js` (copied forward like
+`raycaster.js`), `bsp.js` (step 18) and `colormap.js` (step 19). Textures are shared in
+spirit with Part 2 (`textures.js`), plus flats and a sky. Each step's 1993 box is titled
+“How Doom did it in 1993” (`aside.retro.doom`).
+
+The Ken Silverman / Build aside went into step 17, next to our own portal renderer, rather
+than step 19.
+
+## Part 5: Quake-style true 3D (draft, not started)
+
+Doom kept walls vertical and floors flat, so every column (or row) had one depth. Quake
+(1996) dropped that: polygons at any angle, rooms above rooms, looking up and down. Most of
+Part 4's ideas carry over one dimension up; what's new is the machinery around them.
+Rough size: 2–3× Part 4's engine, plus a level compiler. 1996 boxes would be titled
+“How Quake did it in 1996” (`aside.retro.quake`).
+
+| # | Step | Key ideas | 1996 box |
+|---|------|-----------|----------|
+| 20 | A 3D camera | yaw/pitch (roll optional), 3×3 camera matrix and its inverse (transpose: it's a rotation), 3D points and projection `x = W/2·(1 + u/v)`, `y = H/2·(1 − w/v)`, a wireframe of a few boxes | Quake's `vright`/`vup`/`vpn` vectors, `R_TransformVector` |
+| 21 | Clipping polygons | the view frustum as 4 planes + near plane, signed distance to a plane, Sutherland–Hodgman clipping (step 16's near-plane cut, applied plane by plane), back-face culling with the polygon normal | `R_ClipEdge`, clipping against the frustum before projection |
+| 22 | Filling and texturing polygons | scanline rasterising a convex polygon, texture axes (s, t) per surface, 1/z, s/z, t/z linear in x **and** y (step 16's algebra in 2D), affine vs. per-pixel divide vs. divide every 16 pixels | `D_DrawSpans16`, overlapping the FPU divide with integer work on the Pentium |
+| 23 | Hiding what's behind: a z-buffer | one depth (1/z) per pixel, why Doom didn't need it, cost vs. simplicity, front-to-back order still saves fill | Quake used a z-buffer only for models (`d_pzbuffer`), the world never reads it |
+| 24 | A 3D BSP from brushes | levels as convex brushes (axis-aligned boxes first), faces from brushes, removing hidden faces (simple CSG), building the BSP with planes instead of lines, front-to-back walk, leaves and `pointInLeaf` | `qbsp`, `.map` brush format, `dnode_t`/`dleaf_t` |
+| 25 | Lightmaps | light baked per surface on a coarse grid (16 texels per luxel), point lights with distance falloff and line-of-sight shadows through the BSP, bilinear blend, surface cache (texture × lightmap, built once, reused) | `light` tool, `D_CacheSurface`, the surface cache's memory budget |
+| 26 | Potentially visible sets | which leaves can ever see which, stored per leaf as a bit vector, skip everything else before drawing; a simple (slow) way to compute it by sampling, the real portal-flow idea described | `vis` and its long compile times, run-length compressed PVS |
+| 27 | Edge-sorted spans (optional) | the active edge table, sorting surfaces per scanline by 1/z, each pixel drawn once with no z-buffer | Michael Abrash's write-ups of Quake's span sorting |
+
+Decisions to make before starting:
+
+- **Level authoring.** Brushes are much harder to type than sector outlines. Options: a tiny
+  JS brush format (boxes + a few wedges), levels generated by code, or a small importer for
+  a subset of Quake's `.map` text format. Probably start with boxes only and add sloped
+  brushes in step 24.
+- **Hidden surfaces.** Use the z-buffer (step 23) for the main engine and make edge sorting
+  the optional last step, rather than the other way round. Simpler to follow, honest about
+  the trade-off.
+- **New files.** `math3d.js` (vectors, matrices, planes), `raster.js` (clipping and polygon
+  filling), `brushes.js` + `bsp3d.js` (the compiler), `lightmap.js`, `renderer3d.js`. Keep
+  `colormap.js` from step 19: Quake is also 256 colours with a colormap (64 light levels).
+- **Collision.** Player as an axis-aligned box against brush planes (Quake's hull clipping
+  idea), or a sphere against polygons. Keep it minimal; it isn't the point of Part 5.
+- **Out of scope:** alias models (animated meshes), particles, water warping, networking.
+  Mention them in the final step's wrap-up.
 
 ## Open questions / ideas
 
 - Blog publishing: GitHub Pages straight from this repo will work as-is (no build).
 - Part 3 kept the engine (`raycaster.js`) and the game (`game.js`) apart rather than adding
-  an "engine API". Part 4 replaces the grid, so it will need its own renderer anyway.
+  an "engine API". Part 4 replaced the grid with its own renderer (`renderer.js`).
+- Possible Part 4 extras: sprites in the Doom renderer (vissprites clipped by drawsegs),
+  moving floors and ceilings (doors, lifts), transparent middle textures.
 - Possible extra step between 10 and 11: performance (typed arrays, avoiding
   allocations in the frame loop, measuring frame time), plus a fixed-point
   version of `castRay` as a 1992 experiment.

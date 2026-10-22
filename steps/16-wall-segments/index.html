@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projecting Wall Segments</title>
+<link rel="stylesheet" href="../../common/style.css">
+</head>
+<body>
+<nav class="steps-nav">
+  <a href="../15-polygons/index.html">← Step 15: From grids to polygons</a>
+  <a href="../../index.html">↑ Contents</a>
+  <a href="../17-heights/index.html">Step 17: Variable heights →</a>
+</nav>
+
+<article>
+<p class="kicker">Part 4 · Step 16</p>
+<h1>Projecting wall segments</h1>
+<p class="lede">Instead of asking, for every screen column, which wall it sees, ask, for every wall,
+which columns it covers. Transform its two ends into camera space, cut off what's behind us, project,
+and fill in the columns between. The one subtle part is the texture, because depth doesn't change
+evenly across the screen. But one over depth does.</p>
+
+<h2>A wall is two points</h2>
+<p>A wall is a straight segment between two vertices. In 3D it's a rectangle standing on the floor,
+but every point of it projects the way its bottom edge does, so the segment is all we need. Step 11
+placed a sprite on screen by moving one point into camera space. A wall is the same thing done for both
+ends:</p>
+<pre><code>const a = toCameraSpace(p, line.v1.x, line.v1.y);   // (u, v): v = depth, u/v = c
+const b = toCameraSpace(p, line.v2.x, line.v2.y);
+const x1 = (W / 2) * (1 + a.u / a.v);                 // screen columns of the two ends
+const x2 = (W / 2) * (1 + b.u / b.v);</code></pre>
+<p>A straight line in the world projects to a straight line on screen, so the wall covers exactly the
+columns from <code>x1</code> to <code>x2</code>. Projecting two points replaces 320 ray tests per
+wall, and walls we can't see cost almost nothing, because we find out early. There are three
+ways to be invisible:</p>
+<ul>
+  <li><strong>Facing away.</strong> A one-sided wall is only ever seen from the front, so if
+  <code>pointOnSide</code> (step 15) puts the camera behind it, we skip it. From anywhere in the
+  level, the far side of every pillar and many walls of other rooms face away. This is <em>back-face
+  culling</em>. As a bonus, a wall seen from the
+  front always has <code>x1 &lt; x2</code>: <code>v1</code> is on the left.</li>
+  <li><strong>Behind us.</strong> Both ends have <code>v ≤ 0</code>.</li>
+  <li><strong>Off to the side.</strong> <code>x2 ≤ 0</code> or <code>x1 ≥ W</code>.</li>
+</ul>
+
+<h2>Clipping at the near plane</h2>
+<p>The interesting case is a wall that runs from in front of us to behind us, like the wall beside you
+in a corridor. The end behind us has a negative <code>v</code>, and dividing by it flips it to the
+wrong side of the screen. An end with <code>v</code> close to 0 lands at an enormous <code>x</code>.
+So before projecting, we cut the wall at a <em>near plane</em>, a line just in front of the eye at
+<code>v = NEAR_PLANE</code> (0.05), and keep only the part beyond it.</p>
+<p>Where does the wall cross the near plane? Moving along a straight wall, <code>u</code> and
+<code>v</code> both change linearly (camera space is the world, moved and turned). So the crossing
+is the fraction</p>
+<p class="math">f = (NEAR − v<sub>1</sub>) / (v<sub>2</sub> − v<sub>1</sub>)</p>
+<p>of the way from <code>v1</code> to <code>v2</code>, and the new end is
+<code>u<sub>1</sub> + f·(u<sub>2</sub> − u<sub>1</sub>)</code>, <code>v = NEAR</code>. The same
+<code>f</code> moves the wall's texture coordinate, which we'll need in a moment. This is how every 3D
+renderer since has handled “behind the camera”: clip first, then divide.</p>
+
+<figure class="demo">
+  <div style="display:flex;flex-wrap:wrap;gap:0.6rem;justify-content:center">
+    <canvas id="w-top" width="640" height="300"></canvas>
+    <canvas class="pixels" id="w-view" width="320" height="200" style="flex:1 1 320px"></canvas>
+  </div>
+  <div class="controls">
+    <label><input type="checkbox" id="w-affine"> affine texture (interpolate <code>along</code>, not <code>along/v</code>)</label>
+  </div>
+  <div class="readout" id="w-readout"></div>
+  <figcaption>The camera sits at the bottom, looking up the page. Drag the ends of the wall. The green
+  line is the screen window from step 3, and the dashed lines from the eye through each end cross it
+  at <code>x1</code> and <code>x2</code>. Drag an end below the eye to see clipping: the red dashed part
+  is cut off at the near plane. Turn the wall round to see back-face culling. Hover the 3D view to pick
+  a column.</figcaption>
+</figure>
+
+<h2>Filling in the columns, correctly</h2>
+<p>Between <code>x1</code> and <code>x2</code>, each column needs two things: the wall's depth there,
+for its height, and how far along the wall it is, for the texture column. We know both at the two
+ends. It's tempting to blend linearly between them across the screen, but that's wrong. Equal steps
+on screen are not equal steps along the wall. The near half of a wall covers more of the screen than
+the far half.</p>
+<p>The fix is a small piece of algebra. The wall lies on a straight line in camera space, which can
+be written <code>A·u + B·v = D</code> for some numbers <code>A</code>, <code>B</code> and
+<code>D</code>. Divide by <code>v</code>, and remember that <code>u/v</code> is the screen
+position <code>c</code>:</p>
+<p class="math">A·c + B = D / v &nbsp;&nbsp;⇒&nbsp;&nbsp; 1/v = (A·c + B) / D</p>
+<p>So <code>1/v</code>, one over depth, is a linear function of the screen position. It changes by
+the same amount from column to column. The distance along the wall, call it <code>along</code>, is
+linear in <code>u</code> and <code>v</code>, so the same division shows that
+<code>along/v</code> is linear in <code>c</code> too. The recipe:</p>
+<pre><code>let iz = 1 / v1, az = along1 / v1;                       // at x1
+const dIz = (1 / v2 - iz) / (x2 - x1);                    // constant steps per column
+const dAz = (along2 / v2 - az) / (x2 - x1);
+for (let x = xStart; x &lt; xEnd; x++, iz += dIz, az += dAz) {
+  const depth = 1 / iz;
+  const along = az * depth;                              // divide out the 1/v again
+  const lineHeight = projScale * iz;                     // = projScale / depth, no division
+  // … draw the column exactly as in step 15
+}</code></pre>
+<p>Two additions and one division per column. This is called <em>perspective-correct</em>
+interpolation, and every GPU does it today, for every pixel of every triangle. The column's
+<code>lineHeight</code> doesn't even need the division: it's <code>projScale / depth</code>, so it's
+linear across the screen as well. A wall's top and bottom edges on screen are straight lines.</p>
+<p>Tick <em>affine texture</em> in the demo to interpolate <code>along</code> directly instead. Make
+the wall long and turn it away from you: the bricks bunch up at the near end and stretch at the far
+one, and they swim as the wall moves. Early 3D hardware such as the original PlayStation did exactly
+this, which is why its textures wobble.</p>
+
+<h2>Which wall wins a column?</h2>
+<p>Ray casting answered that for free: the first wall the ray hits. Now walls are drawn one at a
+time, in whatever order the map lists them, and several can cover the same column. For now we use the
+one-row depth buffer from step 11. Each column remembers the depth of the wall drawn there, and
+another wall only draws over it if it's nearer:</p>
+<pre><code>if (depth &gt;= zBuffer[x]) continue;   // something nearer is already here
+zBuffer[x] = depth;</code></pre>
+<p>Every wall spans the full height of its column (every floor is at 0 and every ceiling at 1), so
+one depth per column is enough, as it was for sprites.</p>
+
+<figure class="demo">
+  <div class="game" id="g-game">
+    <canvas class="view pixels" id="g-view" width="320" height="200"></canvas>
+    <canvas class="minimap" id="g-map" width="240" height="240"></canvas>
+  </div>
+  <div class="controls">
+    <label><input type="checkbox" id="g-depth" checked> depth test</label>
+    <label><input type="checkbox" id="g-affine"> affine texture</label>
+  </div>
+  <div class="readout" id="g-readout"></div>
+  <figcaption>Step 15's level, now drawn wall by wall. Click the view to move. On the map, yellow
+  walls are drawn, light grey ones project off screen, and dark ones face away or are behind you.
+  The readout counts how many pixels were written: anything above 1 × the wall area means pixels
+  that were painted and then painted over.</figcaption>
+</figure>
+
+<div class="try">
+<ul>
+  <li>Turn off the depth test. Walls are drawn in map order, and wherever a far wall comes later in
+  the list than a near one, it's painted over it.</li>
+  <li>Watch the counts as you turn: around 40% of the walls face away from wherever you stand.</li>
+  <li>Stand in the hall and look towards the blue room. Every wall in the room beyond the corridor is
+  drawn, then mostly painted over by nearer walls. The readout's “× the wall area” number goes up. That
+  wasted work grows with the size of the level. Step 18 fixes it.</li>
+  <li>Hug a long wall and look along it: it's clipped at the near plane every frame.</li>
+</ul>
+</div>
+
+<aside class="retro doom">
+<h3>Angles instead of a near plane</h3>
+<p>Doom does this with angles. <code>R_AddLine</code> turns each end of a wall into the angle at
+which the viewer sees it (<code>R_PointToAngle</code>, a table lookup on the slope), and clips the
+pair of angles to the 90° field of view. Any part of the wall outside it, including anything behind
+the viewer, is simply gone, and the clipped angles go through a table, <code>viewangletox</code>,
+to become screen columns. Walls facing away come out with their angles the wrong way round, and are
+dropped like ours.</p>
+<p>The column loop, <code>R_RenderSegLoop</code>, steps <code>rw_scale</code>, the wall's
+on-screen scale, by a constant <code>rw_scalestep</code> per column. Scale is
+<code>projection / depth</code>, so that's exactly our <code>1/v</code> stepping. The texture column
+is worked out per column from the angle again: with <code>rw_distance</code> the perpendicular
+distance from the eye to the wall's line, it's <code>rw_offset − tan(angle) · rw_distance</code>,
+which is exact rather than interpolated. The scale is clamped to a maximum, so a wall right in your
+face doesn't get an absurd height.</p>
+<p>The reason none of this needs a division per <em>pixel</em> is Doom's big simplification: walls
+are always vertical, and floors are always horizontal, and you can't look up or down. Every wall
+column is at one depth, and (step 19) every floor row is too. Quake (1996), with true 3D, had to
+divide for perspective along its spans, and did it only every 16 pixels, interpolating in between.
+The PlayStation's texture wobble comes from not doing it at all.</p>
+<p>And Doom has no depth buffer. It draws walls in an order where nothing drawn later can be in front
+of anything drawn earlier, so a column can be marked “done” and never touched again. Finding that
+order is what step 18 is about.</p>
+</aside>
+
+<h2>Next</h2>
+<p>So far every floor is at 0 and every ceiling at 1, so two-sided lines are invisible. Doom's
+sectors each have their own floor and ceiling height. Then a two-sided line isn't invisible any more:
+it's a step, a ledge, or a window, with wall above and below it. That breaks the depth buffer, since
+a column can now show several walls stacked on top of each other.</p>
+</article>
+
+<nav class="steps-nav bottom">
+  <a href="../15-polygons/index.html">← Step 15: From grids to polygons</a>
+  <a href="../17-heights/index.html">Step 17: Variable heights →</a>
+</nav>
+
+<script src="../../common/diagram.js"></script>
+<script src="level.js"></script>
+<script src="renderer.js"></script>
+<script src="textures.js"></script>
+<script src="demo.js"></script>
+</body>
+</html>
